@@ -134,6 +134,12 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
       console.log("[mock] bump_copy_stats", args?.id, "->", item.copyCount);
       return null;
     }
+    case "win_minimize":
+    case "win_toggle_maximize":
+    case "win_close":
+      return null;
+    case "win_is_maximized":
+      return false;
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
   }

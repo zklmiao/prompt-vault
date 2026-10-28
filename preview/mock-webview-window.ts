@@ -29,5 +29,9 @@ export function getCurrentWebviewWindow() {
         handlers.delete(handler);
       };
     },
+    async onResized(_handler: () => void) {
+      // 预览环境没有真实窗口尺寸变化;返回 unlisten 形状保持一致
+      return () => {};
+    },
   };
 }

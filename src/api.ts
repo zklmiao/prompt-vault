@@ -54,6 +54,15 @@ export const setHotkeys = (
 export const hideQuickpick = (): Promise<void> =>
   invoke("hide_quickpick");
 
+// ---- 自绘标题栏的窗口控制 ----
+export const winMinimize = (): Promise<void> => invoke("win_minimize");
+export const winToggleMaximize = (): Promise<void> =>
+  invoke("win_toggle_maximize");
+export const winIsMaximized = (): Promise<boolean> =>
+  invoke("win_is_maximized");
+/** 关闭 = 隐藏到托盘(CloseRequested 由 Rust 拦截) */
+export const winClose = (): Promise<void> => invoke("win_close");
+
 const JSON_FILTERS = [{ name: "JSON", extensions: ["json"] }];
 
 export const chooseDataFileSave = (defaultPath: string): Promise<string | null> =>

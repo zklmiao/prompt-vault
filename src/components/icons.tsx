@@ -168,3 +168,28 @@ export function IconSettings(p: IconProps) {
     </Svg>
   );
 }
+
+export function IconMinimize(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5 12h14" />
+    </Svg>
+  );
+}
+
+export function IconMaximize(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="5" y="5" width="14" height="14" rx="1" />
+    </Svg>
+  );
+}
+
+export function IconRestore(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="8" y="8" width="12" height="12" rx="1" />
+      <path d="M5 16H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1" />
+    </Svg>
+  );
+}

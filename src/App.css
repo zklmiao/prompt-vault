@@ -13,6 +13,7 @@
   --on-accent: #ffffff;
   --danger: #d4494f;
   --danger-soft: #fdf1f1;
+  --on-danger: #ffffff;
   --star: #d9a013;
   --body-bg: #f8f9fb;
   --input-bg: #fafbfc;
@@ -38,6 +39,7 @@
   --on-accent: #ffffff;
   --danger: #e06b70;
   --danger-soft: #3a2629;
+  --on-danger: #ffffff;
   --star: #e2b23e;
   --body-bg: #1a1c21;
   --input-bg: #1a1c21;
@@ -198,6 +200,66 @@ textarea.mono {
   gap: 8px;
   margin-left: auto;
   align-items: center;
+}
+
+/* ============ 自绘标题栏 ============ */
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.titlebar-brand img {
+  display: block;
+  border-radius: 3px;
+}
+
+.titlebar-spacer {
+  flex: 1;
+  align-self: stretch;
+}
+
+.titlebar-controls {
+  display: flex;
+  align-self: stretch;
+}
+
+.titlebar-btn {
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.titlebar-btn:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.titlebar-close:hover {
+  background: var(--danger);
+  color: var(--on-danger);
 }
 
 /* ============ 按钮 ============ */

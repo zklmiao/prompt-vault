@@ -33,6 +33,7 @@ import Sidebar from "./components/Sidebar";
 import DetailPane from "./components/DetailPane";
 import BatchPanel from "./components/BatchPanel";
 import DropOverlay from "./components/DropOverlay";
+import TitleBar from "./components/TitleBar";
 import PlaceholderModal from "./components/PlaceholderModal";
 import ConfirmModal from "./components/ConfirmModal";
 import ImportChoiceModal from "./components/ImportChoiceModal";
@@ -941,6 +942,7 @@ export default function App() {
   if (setupFailed) {
     return (
       <div className="app">
+        <TitleBar />
         <SetupScreen onPick={() => void chooseDataLocation()} />
       </div>
     );
@@ -948,6 +950,7 @@ export default function App() {
   if (loadError) {
     return (
       <div className="app">
+        <TitleBar />
         <LoadErrorScreen
           path={loadError}
           restoreState={restoreState}
@@ -959,6 +962,7 @@ export default function App() {
   if (!ready) {
     return (
       <div className="app">
+        <TitleBar />
         <div className="screen">
           <div className="spinner" aria-label="加载中" />
         </div>
@@ -968,6 +972,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <TitleBar />
       <header className="header">
         <div className="search-wrap">
           <IconSearch size={15} className="search-icon" />

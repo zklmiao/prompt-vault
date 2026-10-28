@@ -474,6 +474,46 @@ fn hide_quickpick(app: AppHandle) {
     }
 }
 
+/// 自绘标题栏:最小化主窗口
+#[tauri::command]
+fn win_minimize(app: AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_LABEL) {
+        let _ = w.minimize();
+    }
+}
+
+/// 自绘标题栏:主窗口当前是否最大化(决定最大化/还原图标)
+#[tauri::command]
+fn win_is_maximized(app: AppHandle) -> bool {
+    app.get_webview_window(MAIN_LABEL)
+        .and_then(|w| w.is_maximized().ok())
+        .unwrap_or(false)
+}
+
+/// 自绘标题栏:最大化/还原切换
+#[tauri::command]
+fn win_toggle_maximize(app: AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_LABEL) {
+        match w.is_maximized() {
+            Ok(true) => {
+                let _ = w.unmaximize();
+            }
+            _ => {
+                let _ = w.maximize();
+            }
+        }
+    }
+}
+
+/// 自绘标题栏:关闭主窗口。window.close() 会触发 CloseRequested,
+/// 由现有拦截逻辑转为"隐藏到托盘",行为与系统 ✕ 完全一致
+#[tauri::command]
+fn win_close(app: AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_LABEL) {
+        let _ = w.close();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -516,7 +556,11 @@ pub fn run() {
             path_meta,
             bump_copy_stats,
             first_run_default,
-            hide_quickpick
+            hide_quickpick,
+            win_minimize,
+            win_is_maximized,
+            win_toggle_maximize,
+            win_close
         ])
         .setup(move |app| {
             // 恢复上次记住的主窗口位置与大小
