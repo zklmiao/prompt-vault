@@ -28,3 +28,9 @@ data/
 *.sln
 *.sw?
 releases/
+
+# 本地手动测试夹具(含大文件,不提交)
+test-files/
+
+# 预览截图(本地调试产物,不提交)
+preview/shot*.png

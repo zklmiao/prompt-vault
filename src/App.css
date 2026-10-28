@@ -322,7 +322,7 @@ textarea.mono {
 
 .row {
   position: relative;
-  padding: 10px 40px 10px 14px;
+  padding: 10px 40px 10px 40px;
   cursor: pointer;
   border-bottom: 1px solid var(--body-bg);
   border-left: 3px solid transparent;
@@ -338,6 +338,30 @@ textarea.mono {
 .row.active {
   background: var(--accent-soft);
   border-left-color: var(--accent);
+}
+
+.row.checked {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.row-check {
+  position: absolute;
+  left: 13px;
+  top: 13px;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.row:hover .row-check,
+.list.selecting .row-check,
+.row-check:checked {
+  opacity: 1;
 }
 
 .row-title {
@@ -778,6 +802,44 @@ textarea.mono {
   line-height: 1.6;
 }
 
+/* ============ 拖放提示遮罩 ============ */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--overlay) 55%, transparent);
+  pointer-events: none;
+  animation: pv-fade-in 0.12s ease;
+}
+
+.drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 30px 44px;
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  color: var(--accent);
+  text-align: center;
+}
+
+.drop-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.drop-hint {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 /* ============ Toast ============ */
 .toast {
   position: fixed;
@@ -905,6 +967,51 @@ textarea.mono {
   padding: 8px 16px;
   color: var(--danger);
   font-size: 13px;
+}
+
+/* ============ 批量操作面板 ============ */
+.batch-panel {
+  max-width: 760px;
+}
+
+.batch-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.batch-head .detail-title {
+  flex: 1;
+}
+
+.batch-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.batch-tag-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.batch-tag-box .field {
+  flex: 1;
+  margin-top: 0;
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.batch-hint {
+  margin-top: 20px;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 /* ============ 滚动条 ============ */

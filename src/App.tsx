@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import "./App.css";
-import type { Draft, ImportMode, Mode, PromptItem, Theme } from "./types";
+import type { Draft, ImportMode, Mode, NewPrefill, PromptItem, Theme } from "./types";
 import {
   chooseDataFileSave,
   chooseExportFile,
@@ -9,6 +10,7 @@ import {
   copyToClipboard,
   firstRunDefaultPath,
   getDataPath,
+  pathMeta,
   readClipboard,
   readDataFile,
   restoreBackup,
@@ -27,6 +29,8 @@ import {
 import { applyTheme, currentTheme } from "./theme";
 import Sidebar from "./components/Sidebar";
 import DetailPane from "./components/DetailPane";
+import BatchPanel from "./components/BatchPanel";
+import DropOverlay from "./components/DropOverlay";
 import PlaceholderModal from "./components/PlaceholderModal";
 import ConfirmModal from "./components/ConfirmModal";
 import ImportChoiceModal from "./components/ImportChoiceModal";
@@ -44,6 +48,11 @@ import {
 
 type Toast = { text: string; kind: "ok" | "err" };
 type RestoreState = "idle" | "doing" | "none";
+
+function fileNameOf(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
 
 function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(currentTheme());
@@ -123,13 +132,17 @@ export default function App() {
   const [copyTarget, setCopyTarget] = useState<PromptItem | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<PromptItem | null>(null);
   const [importCandidate, setImportCandidate] = useState<PromptItem[] | null>(null);
-  const [prefillBody, setPrefillBody] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<NewPrefill | null>(null);
   const [prefillSeq, setPrefillSeq] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [batchPurgeOpen, setBatchPurgeOpen] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
   const dataPathRef = useRef<string | null>(null);
   const bootstrapped = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const shiftAnchor = useRef<string | null>(null);
 
   const showToast = useCallback((text: string, kind: "ok" | "err" = "ok") => {
     setToast({ text, kind });
@@ -217,7 +230,7 @@ export default function App() {
       }
       try {
         const u2 = await listen<string | null>("clipboard-new", (e) => {
-          setPrefillBody(e.payload ?? "");
+          setPrefill({ body: e.payload ?? "" });
           setPrefillSeq((s) => s + 1);
           setMode({ kind: "new" });
         });
@@ -299,8 +312,13 @@ export default function App() {
     ? (items.find((i) => i.id === selectedId) ?? null)
     : null;
 
+  const selectedItems = useMemo(
+    () => items.filter((it) => selectedIds.has(it.id)),
+    [items, selectedIds],
+  );
+
   const startNew = useCallback(() => {
-    setPrefillBody(null);
+    setPrefill(null);
     setPrefillSeq((s) => s + 1);
     setMode({ kind: "new" });
   }, []);
@@ -312,10 +330,191 @@ export default function App() {
     } catch {
       /* 剪贴板不可用则新建空白 */
     }
-    setPrefillBody(text ?? "");
+    setPrefill({ body: text ?? "" });
     setPrefillSeq((s) => s + 1);
     setMode({ kind: "new" });
   }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    shiftAnchor.current = null;
+  }, []);
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    shiftAnchor.current = id;
+  }, []);
+
+  /** 行点击:Ctrl 多选切换 / Shift 连选区间 / 普通点击清空多选并单选 */
+  const handleRowClick = useCallback(
+    (id: string, e: React.MouseEvent) => {
+      if (e.shiftKey) {
+        const ids = filtered.map((it) => it.id);
+        const anchor = shiftAnchor.current ?? selectedId ?? id;
+        const a = ids.indexOf(anchor);
+        const b = ids.indexOf(id);
+        if (a === -1 || b === -1) {
+          toggleSelected(id);
+          return;
+        }
+        const [lo, hi] = a <= b ? [a, b] : [b, a];
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const x of ids.slice(lo, hi + 1)) next.add(x);
+          return next;
+        });
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) {
+        toggleSelected(id);
+        return;
+      }
+      setSelectedIds(new Set());
+      shiftAnchor.current = id;
+      setSelectedId(id);
+      setMode({ kind: "view" });
+    },
+    [filtered, selectedId, toggleSelected],
+  );
+
+  /** 全选只覆盖当前列表(受搜索/标签筛选影响),不是全库 */
+  const selectAllFiltered = useCallback(() => {
+    setSelectedIds(new Set(filtered.map((it) => it.id)));
+    shiftAnchor.current = filtered.length
+      ? filtered[filtered.length - 1].id
+      : null;
+  }, [filtered]);
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((it) => selectedIds.has(it.id));
+
+  const handleBatchAddTags = useCallback(
+    async (tags: string[]) => {
+      if (tags.length === 0 || selectedIds.size === 0) return;
+      const now = nowIso();
+      const next = items.map((it) =>
+        selectedIds.has(it.id)
+          ? {
+              ...it,
+              tags: [...it.tags, ...tags.filter((t) => !it.tags.includes(t))],
+              updatedAt: now,
+            }
+          : it,
+      );
+      await persist(next);
+      showToast(`已为 ${selectedIds.size} 条添加标签`);
+    },
+    [items, selectedIds, persist, showToast],
+  );
+
+  const handleBatchDelete = useCallback(async () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    const now = nowIso();
+    const next = items.map((it) =>
+      selectedIds.has(it.id) ? { ...it, deletedAt: now } : it,
+    );
+    const affected = selectedId !== null && selectedIds.has(selectedId);
+    await persist(next);
+    if (affected) {
+      setSelectedId(null);
+      setMode({ kind: "view" });
+    }
+    clearSelection();
+    showToast(`已将 ${count} 条移入回收站`);
+  }, [items, selectedIds, selectedId, persist, clearSelection, showToast]);
+
+  const handleBatchExport = useCallback(async () => {
+    if (selectedItems.length === 0) return;
+    const path = await chooseExportFile("prompt-vault-selection.json");
+    if (!path) return;
+    try {
+      await writeDataFile(path, serializeDataFile(selectedItems));
+      showToast(`已导出 ${selectedItems.length} 条`);
+    } catch (e) {
+      showToast(`导出失败:${String(e)}`, "err");
+    }
+  }, [selectedItems, showToast]);
+
+  const handleBatchRestore = useCallback(async () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    const next = items.map((it) =>
+      selectedIds.has(it.id) ? { ...it, deletedAt: undefined } : it,
+    );
+    await persist(next);
+    setSelectedId(null);
+    setMode({ kind: "view" });
+    clearSelection();
+    showToast(`已恢复 ${count} 条`);
+  }, [items, selectedIds, persist, clearSelection, showToast]);
+
+  const handleBatchPurge = useCallback(async () => {
+    setBatchPurgeOpen(false);
+    const count = selectedIds.size;
+    if (count === 0) return;
+    const next = items.filter((it) => !selectedIds.has(it.id));
+    const affected = selectedId !== null && selectedIds.has(selectedId);
+    await persist(next);
+    if (affected) {
+      setSelectedId(null);
+      setMode({ kind: "view" });
+    }
+    clearSelection();
+    showToast(`已彻底删除 ${count} 条`);
+  }, [items, selectedIds, selectedId, persist, clearSelection, showToast]);
+
+  // 多选快捷键:Ctrl+A 全选当前列表,Esc 清空(弹窗与输入框优先)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (typeof e.key !== "string") return;
+      const target = e.target as HTMLElement | null;
+      const typing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const modalOpen = !!(
+        copyTarget ||
+        purgeTarget ||
+        importCandidate ||
+        batchPurgeOpen
+      );
+      if (e.key === "Escape" && !typing && !modalOpen && selectedIds.size > 0) {
+        e.preventDefault();
+        clearSelection();
+        return;
+      }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.key === "a" || e.key === "A") &&
+        !typing &&
+        !modalOpen &&
+        filtered.length > 0
+      ) {
+        e.preventDefault();
+        selectAllFiltered();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    copyTarget,
+    purgeTarget,
+    importCandidate,
+    batchPurgeOpen,
+    selectedIds.size,
+    filtered.length,
+    clearSelection,
+    selectAllFiltered,
+  ]);
 
   const handleSave = useCallback(
     async (draft: Draft) => {
@@ -446,29 +645,123 @@ export default function App() {
   const toggleTrash = useCallback(() => {
     setTrashOpen((v) => !v);
     setSelectedId(null);
+    setSelectedIds(new Set());
+    shiftAnchor.current = null;
     setMode({ kind: "view" });
     setActiveTag(null);
   }, []);
 
+  const importFromPath = useCallback(
+    async (path: string) => {
+      try {
+        const raw = await readDataFile(path);
+        if (raw === null) {
+          showToast("无法读取该文件", "err");
+          return;
+        }
+        const incoming = coerceItems(JSON.parse(raw));
+        if (incoming.length === 0) {
+          showToast("文件中没有可导入的记录", "err");
+          return;
+        }
+        setImportCandidate(incoming);
+      } catch {
+        showToast("文件解析失败,请确认是 Prompt Vault 导出的 JSON", "err");
+      }
+    },
+    [showToast],
+  );
+
   const handleImportPick = useCallback(async () => {
     const path = await chooseImportFile();
     if (!path) return;
-    try {
-      const raw = await readDataFile(path);
+    await importFromPath(path);
+  }, [importFromPath]);
+
+  /** 原生拖放:第一个路径决定走导入(.json)还是新建文本 */
+  const handleDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      const list = paths.filter((p) => typeof p === "string" && p.length > 0);
+      if (list.length === 0) return;
+      if (list.length > 1) showToast("一次仅处理一个文件");
+      const path = list[0];
+      const multi = list.length > 1;
+      const name = fileNameOf(path);
+      const meta = await pathMeta(path).catch(() => null);
+      if (meta?.isDir) {
+        showToast("不支持文件夹", "err");
+        return;
+      }
+      if (name.toLowerCase().endsWith(".json")) {
+        if (meta && meta.size > 10 * 1024 * 1024) {
+          showToast("JSON 文件超过 10MB,已拒绝", "err");
+          return;
+        }
+        await importFromPath(path);
+        return;
+      }
+      // 其余一律按文本处理
+      if (meta && meta.size > 1024 * 1024) {
+        showToast("文本文件超过 1MB,已拒绝", "err");
+        return;
+      }
+      let raw: string | null = null;
+      try {
+        raw = await readDataFile(path);
+      } catch {
+        raw = null;
+      }
       if (raw === null) {
-        showToast("无法读取该文件", "err");
+        showToast("读取失败,请确认是 UTF-8 文本", "err");
         return;
       }
-      const incoming = coerceItems(JSON.parse(raw));
-      if (incoming.length === 0) {
-        showToast("文件中没有可导入的记录", "err");
-        return;
+      const title = name.replace(/\.[^.]+$/, "") || "未命名";
+      setPrefill({ title, body: raw, source: `拖入:${name}` });
+      setPrefillSeq((s) => s + 1);
+      setTrashOpen(false);
+      setSelectedId(null);
+      setMode({ kind: "new" });
+      showToast(multi ? `一次仅处理一个文件,已载入:${name}` : "已载入拖入内容");
+    },
+    [importFromPath, showToast],
+  );
+
+  // 主窗口拖放:用 Tauri 原生事件(HTML5 drop 会被原生拖放拦截)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    (async () => {
+      try {
+        const win = getCurrentWebviewWindow();
+        if (win.label !== "main") return;
+        const stop = await win.onDragDropEvent((event) => {
+          const payload = event.payload;
+          if (payload.type === "enter" || payload.type === "over") {
+            setDropActive(true);
+          } else if (payload.type === "leave") {
+            setDropActive(false);
+          } else if (payload.type === "drop") {
+            setDropActive(false);
+            void handleDroppedPaths(payload.paths);
+          }
+        });
+        if (disposed) {
+          stop();
+        } else {
+          unlisten = stop;
+        }
+      } catch {
+        // 浏览器预览无原生拖放;打包环境若初始化失败在控制台留痕
+        if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+          console.error("drag-drop listener init failed");
+        }
       }
-      setImportCandidate(incoming);
-    } catch {
-      showToast("文件解析失败,请确认是 Prompt Vault 导出的 JSON", "err");
-    }
-  }, [showToast]);
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [handleDroppedPaths]);
 
   const handleImportApply = useCallback(
     async (how: ImportMode) => {
@@ -477,6 +770,7 @@ export default function App() {
       if (!incoming) return;
       if (how === "overwrite") {
         await persist(incoming);
+        clearSelection();
         showToast(`导入完成:已覆盖为 ${incoming.length} 条`);
         return;
       }
@@ -494,9 +788,10 @@ export default function App() {
         }
       }
       await persist([...byId.values()]);
+      clearSelection();
       showToast(`导入完成:新增 ${added} 条,更新 ${updated} 条`);
     },
-    [importCandidate, items, persist, showToast],
+    [importCandidate, items, persist, clearSelection, showToast],
   );
 
   const handleExport = useCallback(async () => {
@@ -615,33 +910,50 @@ export default function App() {
           total={trashOpen ? trashItems.length : liveItems.length}
           trashOpen={trashOpen}
           selectedId={selectedId}
-          onSelect={(id) => {
-            setSelectedId(id);
-            setMode({ kind: "view" });
-          }}
+          selectedIds={selectedIds}
+          onRowClick={handleRowClick}
+          onCheckbox={toggleSelected}
           onTagClick={handleTagClick}
           onQuickCopy={(it) => void handleCopy(it)}
         />
-        <DetailPane
-          item={selectedItem}
-          mode={mode}
-          allTags={allTags}
-          trashOpen={trashOpen}
-          onSave={handleSave}
-          onCancel={() => setMode({ kind: "view" })}
-          onEdit={() => {
-            if (selectedItem) setMode({ kind: "edit", id: selectedItem.id });
-          }}
-          onCopy={(it) => void handleCopy(it)}
-          onTogglePin={(it) => void handleTogglePin(it)}
-          onDelete={(it) => void handleDelete(it)}
-          onTagClick={handleTagClick}
-          onRestore={(it) => void handleRestore(it)}
-          onPurge={(it) => setPurgeTarget(it)}
-          prefillBody={prefillBody}
-          prefillSeq={prefillSeq}
-        />
+        {selectedIds.size > 0 ? (
+          <BatchPanel
+            count={selectedIds.size}
+            trashOpen={trashOpen}
+            allTags={allTags}
+            allSelected={allFilteredSelected}
+            onSelectAll={selectAllFiltered}
+            onClear={clearSelection}
+            onAddTags={handleBatchAddTags}
+            onBatchDelete={handleBatchDelete}
+            onBatchExport={handleBatchExport}
+            onBatchRestore={handleBatchRestore}
+            onBatchPurge={() => setBatchPurgeOpen(true)}
+          />
+        ) : (
+          <DetailPane
+            item={selectedItem}
+            mode={mode}
+            allTags={allTags}
+            trashOpen={trashOpen}
+            onSave={handleSave}
+            onCancel={() => setMode({ kind: "view" })}
+            onEdit={() => {
+              if (selectedItem) setMode({ kind: "edit", id: selectedItem.id });
+            }}
+            onCopy={(it) => void handleCopy(it)}
+            onTogglePin={(it) => void handleTogglePin(it)}
+            onDelete={(it) => void handleDelete(it)}
+            onTagClick={handleTagClick}
+            onRestore={(it) => void handleRestore(it)}
+            onPurge={(it) => setPurgeTarget(it)}
+            prefill={prefill}
+            prefillSeq={prefillSeq}
+          />
+        )}
       </div>
+
+      <DropOverlay visible={dropActive} />
 
       {copyTarget && (
         <PlaceholderModal
@@ -659,6 +971,16 @@ export default function App() {
           danger
           onConfirm={() => void handlePurge(purgeTarget)}
           onCancel={() => setPurgeTarget(null)}
+        />
+      )}
+      {batchPurgeOpen && (
+        <ConfirmModal
+          title="彻底删除"
+          message={`确定彻底删除选中的 ${selectedIds.size} 条?此操作不可恢复。`}
+          confirmText="彻底删除"
+          danger
+          onConfirm={() => void handleBatchPurge()}
+          onCancel={() => setBatchPurgeOpen(false)}
         />
       )}
       {importCandidate && (

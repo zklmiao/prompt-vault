@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Draft, Mode, PromptItem } from "../types";
+import type { Draft, Mode, NewPrefill, PromptItem } from "../types";
 import { extractPlaceholders, formatDate } from "../util";
 import TagInput from "./TagInput";
 import TagChips from "./TagChips";
@@ -26,16 +26,16 @@ interface Props {
   onTagClick: (tag: string) => void;
   onRestore: (item: PromptItem) => void | Promise<void>;
   onPurge: (item: PromptItem) => void;
-  prefillBody: string | null;
+  prefill: NewPrefill | null;
   prefillSeq: number;
 }
 
-function draftFrom(item: PromptItem | null, prefillBody: string | null): Draft {
+function draftFrom(item: PromptItem | null, prefill: NewPrefill | null): Draft {
   return {
-    title: item?.title ?? "",
-    body: item?.body ?? prefillBody ?? "",
+    title: item?.title ?? prefill?.title ?? "",
+    body: item?.body ?? prefill?.body ?? "",
     tags: item?.tags ?? [],
-    source: item?.source ?? "",
+    source: item?.source ?? prefill?.source ?? "",
     note: item?.note ?? "",
     pinned: item?.pinned ?? false,
   };
@@ -55,15 +55,20 @@ export default function DetailPane({
   onTagClick,
   onRestore,
   onPurge,
-  prefillBody,
+  prefill,
   prefillSeq,
 }: Props) {
   if (mode.kind === "new") {
+    const heading = !prefill
+      ? "新建 Prompt"
+      : prefill.source?.startsWith("拖入:")
+        ? "从拖入文件新建"
+        : "从剪贴板新建";
     return (
       <Editor
         key={`new-${prefillSeq}`}
-        heading={prefillBody ? "从剪贴板新建" : "新建 Prompt"}
-        initial={draftFrom(null, prefillBody)}
+        heading={heading}
+        initial={draftFrom(null, prefill)}
         allTags={allTags}
         onSave={onSave}
         onCancel={onCancel}

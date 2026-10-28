@@ -28,6 +28,13 @@ export type ImportMode = "merge" | "overwrite";
 
 export type Theme = "light" | "dark";
 
+/** 带内容进入新建编辑态时的预填(剪贴板 / 拖入文件) */
+export interface NewPrefill {
+  title?: string;
+  body?: string;
+  source?: string;
+}
+
 export interface Draft {
   title: string;
   body: string;

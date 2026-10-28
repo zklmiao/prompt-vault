@@ -237,6 +237,23 @@ fn restore_backup(path: String) -> Result<bool, String> {
     Ok(true)
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PathMeta {
+    is_dir: bool,
+    size: u64,
+}
+
+/// 拖放前的路径检查:目录与文件大小,避免把超大文件读进内存
+#[tauri::command]
+fn path_meta(path: String) -> Option<PathMeta> {
+    let md = fs::metadata(&path).ok()?;
+    Some(PathMeta {
+        is_dir: md.is_dir(),
+        size: md.len(),
+    })
+}
+
 /// 首次启动给保存对话框的建议路径,并尽量预创建目录
 #[tauri::command]
 fn first_run_default() -> String {
@@ -289,6 +306,7 @@ pub fn run() {
             read_data,
             write_data,
             restore_backup,
+            path_meta,
             first_run_default,
             hide_quickpick
         ])

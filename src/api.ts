@@ -21,6 +21,15 @@ export const firstRunDefaultPath = (): Promise<string> =>
 export const restoreBackup = (path: string): Promise<boolean> =>
   invoke("restore_backup", { path });
 
+export interface PathMeta {
+  isDir: boolean;
+  size: number;
+}
+
+/** 拖放前的路径检查:是否目录、文件字节数 */
+export const pathMeta = (path: string): Promise<PathMeta | null> =>
+  invoke("path_meta", { path });
+
 export const hideQuickpick = (): Promise<void> =>
   invoke("hide_quickpick");
 

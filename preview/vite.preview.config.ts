@@ -9,10 +9,14 @@ const r = (f: string) => path.resolve(process.cwd(), "preview", f);
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  server: { port: 1421, strictPort: true },
+  server: { port: 4173, strictPort: true, host: "127.0.0.1" },
   resolve: {
     alias: [
       { find: "@tauri-apps/api/core", replacement: r("mock-core.ts") },
+      {
+        find: "@tauri-apps/api/webviewWindow",
+        replacement: r("mock-webview-window.ts"),
+      },
       { find: "@tauri-apps/plugin-dialog", replacement: r("mock-dialog.ts") },
       {
         find: "@tauri-apps/plugin-clipboard-manager",

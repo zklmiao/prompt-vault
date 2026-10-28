@@ -108,6 +108,11 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
       return null;
     case "read_data":
       return current;
+    case "path_meta":
+      return {
+        isDir: String(args?.path ?? "").endsWith("/"),
+        size: String(args?.path ?? "").includes("big") ? 11 * 1024 * 1024 : 2048,
+      };
     case "write_data":
       current = String(args?.contents ?? "");
       console.log("[mock] write_data", current.length, "chars");
