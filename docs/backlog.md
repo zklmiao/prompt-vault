@@ -6,17 +6,19 @@
 
 ---
 
-## P0 · 立即修(已定位,未修)
+## P0 · 立即修
 
-### P0-1 中文输入法(IME)组字期间 Enter 误触发
+### P0-1 ✅ 中文输入法(IME)组字期间 Enter/Esc 等按键误触发(已修复 `98cde4f`)
 **现象**:用微软拼音等输入法打字时,按 Enter 确认候选词会同时触发业务动作:
-- `src/QuickPick.tsx:135` —— 中文搜索中按 Enter 选字,会**直接复制当前高亮项并隐藏窗口**;
-- `src/components/TagInput.tsx:48` —— 拼音未上屏时按 Enter,会把**拼音串**当标签加入;
-- `src/components/PlaceholderModal.tsx:40` —— 在最后一个变量框按 Enter 选字,会**直接复制**;
-- `src/components/DetailPane.tsx:263` 与 `:329` 的 Ctrl+Enter 同类保护一并补上。
+- `src/QuickPick.tsx` —— 中文搜索中按 Enter 选字,会**直接复制当前高亮项并隐藏窗口**;方向键被拦截、Esc 取消组字却关窗;
+- `src/components/TagInput.tsx` —— 拼音未上屏时按 Enter 会把**拼音串**当标签加入;空输入组字中按 Backspace 会**删掉上一个标签**;
+- `src/components/PlaceholderModal.tsx` —— 在最后一个变量框按 Enter 选字会**直接复制**;
+- `src/components/Modal.tsx` —— 输入框里按 Esc 取消拼音会**直接关掉弹窗**;
+- `src/App.tsx` 两处全局监听、`SettingsModal` 热键录制同样缺保护。
 
-**修法**:所有 Enter 分支最前面加 `if (e.nativeEvent.isComposing) return;`
-**验收**:微软拼音下搜索「编码」,按 Enter 选字只上屏、不复制;标签输入在选词后才加入;占位符输入同样。
+**修复**(`98cde4f`):新增 `src/util.ts` 的 `isComposingEvent()`(同时判定 `isComposing` 与 `keyCode 229`,兼容 Windows/WebView2 输入法),在 8 处按键处理点加守卫:QuickPick(方向键/Enter/Esc)、TagInput(Enter/逗号/Backspace)、PlaceholderModal(Enter)、DetailPane(Ctrl+Enter,并消除正文 textarea 的重复实现)、Modal(Esc)、App 两处全局监听(Ctrl+N/F、Esc/Ctrl+A)、SettingsModal(热键录制)。
+**验证**:`tsc` 零错误;预览页合成 IME 事件断言——组字 Enter 不加标签/不复制、普通 Enter 行为不变,组字 Esc 不关弹窗;构建 + 冒烟通过。
+**仍需人工**:用真实微软拼音在打包 exe 上过一遍原验收清单(合成事件无法完全替代真实 IME)。
 
 ### P0-2 README / 文档截图落后于当前界面
 **现象**:`docs/screenshots/*.png` 摄于自绘标题栏、批量操作、统计功能之前;详情图里的「2 个变量」徽标还是修复前的通栏旧样式。开源首页首图会误导访客。
