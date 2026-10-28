@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { copyToClipboard, bumpCopyStats, getDataPath, hideQuickpick, readDataFile } from "./api";
-import { coerceItems, extractPlaceholders, fillPlaceholders } from "./util";
+import { coerceItems, extractPlaceholders, fillPlaceholders, isComposingEvent } from "./util";
 import type { PromptItem } from "./types";
 import PlaceholderModal from "./components/PlaceholderModal";
 import { IconSearch } from "./components/icons";
@@ -123,6 +123,8 @@ export default function QuickPick() {
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // 输入法组字期间(Enter/Esc/方向键)全部让给输入法
+    if (isComposingEvent(e)) return;
     if (fillTarget) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();

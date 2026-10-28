@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import { getHotkeys, setHotkeys } from "../api";
+import { isComposingEvent } from "../util";
 
 interface Props {
   onClose: () => void;
@@ -83,6 +84,8 @@ function HotkeyField({
         }}
         onBlur={() => setCapturing(false)}
         onKeyDown={(e) => {
+          // 输入法组字期间不录制,避免把选字按键当成快捷键
+          if (isComposingEvent(e)) return;
           // 未在录制时放行 Tab 等默认行为
           if (!capturing) {
             if (e.key === "Tab") return;

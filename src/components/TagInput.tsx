@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isComposingEvent } from "../util";
 
 interface Props {
   value: string[];
@@ -45,6 +46,8 @@ export default function TagInput({ value, onChange, suggestions }: Props) {
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
+            // 组字期间 Enter/逗号/Backspace 都交给输入法,避免把拼音当标签
+            if (isComposingEvent(e)) return;
             if (e.key === "Enter") {
               e.preventDefault();
               add(text);

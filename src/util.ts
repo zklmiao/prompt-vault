@@ -1,4 +1,17 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { PromptItem } from "./types";
+
+/**
+ * 输入法组字期间的按键判定:组字中的 Enter/Esc/方向键等必须让给输入法,
+ * 不能触发业务动作。同时检查 isComposing 与 keyCode 229 ——
+ * Windows/WebView2 上部分输入法只通过 keyCode 229 给出组字信号。
+ */
+export function isComposingEvent(
+  e: ReactKeyboardEvent | KeyboardEvent,
+): boolean {
+  const native = "nativeEvent" in e ? e.nativeEvent : e;
+  return native.isComposing || native.keyCode === 229;
+}
 
 export const newId = (): string => crypto.randomUUID();
 

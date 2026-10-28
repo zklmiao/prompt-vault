@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Modal from "./Modal";
+import { isComposingEvent } from "../util";
 
 interface Props {
   names: string[];
@@ -37,6 +38,8 @@ export default function PlaceholderModal({
             value={values[n] ?? ""}
             onChange={(e) => setValues((v) => ({ ...v, [n]: e.target.value }))}
             onKeyDown={(e) => {
+              // 组字期间按 Enter 只是选字,不能触发复制
+              if (isComposingEvent(e)) return;
               if (e.key === "Enter" && i === names.length - 1) {
                 void onConfirm(values);
               }

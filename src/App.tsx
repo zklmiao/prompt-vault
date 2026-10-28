@@ -22,6 +22,7 @@ import {
   coerceItems,
   extractPlaceholders,
   fillPlaceholders,
+  isComposingEvent,
   isNewer,
   newId,
   newerIso,
@@ -322,6 +323,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isComposingEvent(e)) return;
       if (e.ctrlKey && !e.shiftKey && !e.altKey) {
         if (e.key === "n" || e.key === "N") {
           e.preventDefault();
@@ -542,6 +544,7 @@ export default function App() {
   // 多选快捷键:Ctrl+A 全选当前列表,Esc 清空(弹窗与输入框优先)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isComposingEvent(e)) return;
       if (typeof e.key !== "string") return;
       const target = e.target as HTMLElement | null;
       const typing =

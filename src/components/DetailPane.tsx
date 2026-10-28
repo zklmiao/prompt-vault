@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Draft, Mode, NewPrefill, PromptItem } from "../types";
-import { extractPlaceholders, formatDate } from "../util";
+import { extractPlaceholders, formatDate, isComposingEvent } from "../util";
 import TagInput from "./TagInput";
 import TagChips from "./TagChips";
 import BodyText from "./BodyText";
@@ -260,6 +260,8 @@ function Editor({
   };
 
   const ctrlEnter = (e: React.KeyboardEvent) => {
+    // 组字期间不触发保存,让输入法完成选字
+    if (isComposingEvent(e)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       save();
@@ -325,12 +327,7 @@ function Editor({
             value={draft.body}
             onChange={(e) => set("body", e.target.value)}
             placeholder="把 prompt 正文粘贴到这里…&#10;例如:请审查以下代码变更:{{diff}},重点关注 {{关注点}}。"
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                e.preventDefault();
-                save();
-              }
-            }}
+            onKeyDown={ctrlEnter}
           />
         </div>
 

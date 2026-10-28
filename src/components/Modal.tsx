@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { isComposingEvent } from "../util";
 
 interface Props {
   title: string;
@@ -25,6 +26,8 @@ export default function Modal({ title, onCancel, children }: Props) {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // 输入法组字期间 Esc 只取消组字,不关闭弹窗
+        if (isComposingEvent(e)) return;
         e.preventDefault();
         onCancel();
         return;
