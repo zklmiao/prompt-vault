@@ -62,6 +62,16 @@ export function isNewer(a: string, b: string): boolean {
   return a > b;
 }
 
+/** 两个 ISO 时间取较新者;缺失时返回存在的一方 */
+export function newerIso(
+  a: string | undefined,
+  b: string | undefined,
+): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return isNewer(a, b) ? a : b;
+}
+
 export function serializeDataFile(items: PromptItem[]): string {
   return JSON.stringify({ version: 1, prompts: items }, null, 2);
 }
@@ -108,6 +118,14 @@ export function coerceItems(parsed: unknown): PromptItem[] {
       updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : nowIso(),
       lastValues,
       deletedAt: typeof r.deletedAt === "string" ? r.deletedAt : undefined,
+      copyCount:
+        typeof r.copyCount === "number" &&
+        Number.isFinite(r.copyCount) &&
+        r.copyCount > 0
+          ? Math.floor(r.copyCount)
+          : undefined,
+      lastCopiedAt:
+        typeof r.lastCopiedAt === "string" ? r.lastCopiedAt : undefined,
     });
   }
   return out;

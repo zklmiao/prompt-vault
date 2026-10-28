@@ -221,6 +221,9 @@ export default function DetailPane({
         </div>
 
         <div className="meta">
+          {(item.copyCount ?? 0) > 0
+            ? `已复制 ${item.copyCount} 次 · 最近复制 ${formatDate(item.lastCopiedAt)} · `
+            : ""}
           {isTrash
             ? `删除于 ${formatDate(item.deletedAt)} · 更新于 ${formatDate(item.updatedAt)}`
             : `创建于 ${formatDate(item.createdAt)} · 更新于 ${formatDate(item.updatedAt)}`}

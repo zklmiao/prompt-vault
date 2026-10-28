@@ -21,6 +21,13 @@ export const firstRunDefaultPath = (): Promise<string> =>
 export const restoreBackup = (path: string): Promise<boolean> =>
   invoke("restore_backup", { path });
 
+/**
+ * 复制计数 +1 并记录最近复制时间。
+ * 读-改-写由 Rust 端全局互斥串行化,双窗口并发调用不会丢计数。
+ */
+export const bumpCopyStats = (path: string, id: string): Promise<void> =>
+  invoke("bump_copy_stats", { path, id });
+
 export interface PathMeta {
   isDir: boolean;
   size: number;
@@ -29,6 +36,20 @@ export interface PathMeta {
 /** 拖放前的路径检查:是否目录、文件字节数 */
 export const pathMeta = (path: string): Promise<PathMeta | null> =>
   invoke("path_meta", { path });
+
+export interface Hotkeys {
+  quickpick: string;
+  clipboard_new: string;
+}
+
+/** 读取当前全局热键配置 */
+export const getHotkeys = (): Promise<Hotkeys> => invoke("get_hotkeys");
+
+/** 更新全局热键;失败(被占用/格式非法)时 Rust 返回可读错误并保持旧键 */
+export const setHotkeys = (
+  quickpick: string,
+  clipboardNew: string,
+): Promise<void> => invoke("set_hotkeys", { quickpick, clipboardNew });
 
 export const hideQuickpick = (): Promise<void> =>
   invoke("hide_quickpick");

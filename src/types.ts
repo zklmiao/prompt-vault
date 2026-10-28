@@ -12,6 +12,10 @@ export interface PromptItem {
   lastValues?: Record<string, string>;
   /** 软删除时间;存在即表示处于回收站 */
   deletedAt?: string;
+  /** 成功复制到剪贴板的次数;首次复制后才写入文件 */
+  copyCount?: number;
+  /** 最近一次成功复制的时间 */
+  lastCopiedAt?: string;
 }
 
 export interface DataFile {
@@ -27,6 +31,9 @@ export type Mode =
 export type ImportMode = "merge" | "overwrite";
 
 export type Theme = "light" | "dark";
+
+/** 列表排序:最近更新 / 最近复制 / 最常复制(置顶始终在最前) */
+export type SortMode = "updated" | "recent" | "most";
 
 /** 带内容进入新建编辑态时的预填(剪贴板 / 拖入文件) */
 export interface NewPrefill {

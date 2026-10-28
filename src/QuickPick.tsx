@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { copyToClipboard, getDataPath, hideQuickpick, readDataFile } from "./api";
+import { copyToClipboard, bumpCopyStats, getDataPath, hideQuickpick, readDataFile } from "./api";
 import { coerceItems, extractPlaceholders, fillPlaceholders } from "./util";
 import type { PromptItem } from "./types";
 import PlaceholderModal from "./components/PlaceholderModal";
@@ -15,12 +15,14 @@ export default function QuickPick() {
   const [idx, setIdx] = useState(0);
   const [fillTarget, setFillTarget] = useState<PromptItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dataPath, setDataPath] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     (async () => {
       try {
         const p = await getDataPath();
+        setDataPath(p);
         if (!p) {
           setError("尚未选择数据文件,请先在主窗口完成首次设置");
           return;
@@ -89,6 +91,19 @@ export default function QuickPick() {
     void hideQuickpick();
   }, []);
 
+  /** 统计写盘失败不影响复制与关闭 */
+  const bump = useCallback(
+    async (id: string) => {
+      if (!dataPath) return;
+      try {
+        await bumpCopyStats(dataPath, id);
+      } catch {
+        /* ignore */
+      }
+    },
+    [dataPath],
+  );
+
   const pick = useCallback(
     async (item: PromptItem) => {
       if (extractPlaceholders(item.body).length > 0) {
@@ -101,9 +116,10 @@ export default function QuickPick() {
         setError("复制失败");
         return;
       }
+      await bump(item.id);
       finish();
     },
-    [finish],
+    [finish, bump],
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -182,6 +198,7 @@ export default function QuickPick() {
                 setFillTarget(null);
                 return;
               }
+              await bump(fillTarget.id);
               finish();
             }}
             onCancel={() => setFillTarget(null)}

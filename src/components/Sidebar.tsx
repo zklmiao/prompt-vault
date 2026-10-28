@@ -1,4 +1,4 @@
-import type { PromptItem } from "../types";
+import type { PromptItem, SortMode } from "../types";
 import { formatDate } from "../util";
 import TagChips from "./TagChips";
 import { IconCopy } from "./icons";
@@ -7,6 +7,8 @@ interface Props {
   items: PromptItem[];
   total: number;
   trashOpen: boolean;
+  sortMode: SortMode;
+  onSortChange: (mode: SortMode) => void;
   selectedId: string | null;
   selectedIds: Set<string>;
   onRowClick: (id: string, e: React.MouseEvent) => void;
@@ -19,6 +21,8 @@ export default function Sidebar({
   items,
   total,
   trashOpen,
+  sortMode,
+  onSortChange,
   selectedId,
   selectedIds,
   onRowClick,
@@ -36,7 +40,22 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="list-head">{head}</div>
+      <div className="list-head">
+        <span>{head}</span>
+        {!trashOpen && (
+          <select
+            className="sort-select"
+            value={sortMode}
+            onChange={(e) => onSortChange(e.target.value as SortMode)}
+            title="排序方式(置顶始终在最前)"
+            aria-label="排序方式"
+          >
+            <option value="updated">最近更新</option>
+            <option value="recent">最近复制</option>
+            <option value="most">最常复制</option>
+          </select>
+        )}
+      </div>
       <div className={"list" + (selecting ? " selecting" : "")}>
         {items.map((it) => {
           const checked = selectedIds.has(it.id);
@@ -67,11 +86,18 @@ export default function Sidebar({
                   删除于 {formatDate(it.deletedAt)}
                 </div>
               ) : (
-                it.tags.length > 0 && (
-                  <div className="row-tags">
-                    <TagChips tags={it.tags} onTagClick={onTagClick} />
-                  </div>
-                )
+                <>
+                  {it.tags.length > 0 && (
+                    <div className="row-tags">
+                      <TagChips tags={it.tags} onTagClick={onTagClick} />
+                    </div>
+                  )}
+                  {(it.copyCount ?? 0) > 0 && (
+                    <div className="row-stats">
+                      已复制 {it.copyCount} 次 · 最近 {formatDate(it.lastCopiedAt)}
+                    </div>
+                  )}
+                </>
               )}
               {!trashOpen && !selecting && (
                 <button

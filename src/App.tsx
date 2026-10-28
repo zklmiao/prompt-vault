@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import "./App.css";
-import type { Draft, ImportMode, Mode, NewPrefill, PromptItem, Theme } from "./types";
+import type { Draft, ImportMode, Mode, NewPrefill, PromptItem, SortMode, Theme } from "./types";
 import {
+  bumpCopyStats,
   chooseDataFileSave,
   chooseExportFile,
   chooseImportFile,
@@ -23,6 +24,7 @@ import {
   fillPlaceholders,
   isNewer,
   newId,
+  newerIso,
   nowIso,
   serializeDataFile,
 } from "./util";
@@ -34,6 +36,7 @@ import DropOverlay from "./components/DropOverlay";
 import PlaceholderModal from "./components/PlaceholderModal";
 import ConfirmModal from "./components/ConfirmModal";
 import ImportChoiceModal from "./components/ImportChoiceModal";
+import SettingsModal from "./components/SettingsModal";
 import {
   IconClipboard,
   IconExport,
@@ -41,6 +44,7 @@ import {
   IconMoon,
   IconPlus,
   IconSearch,
+  IconSettings,
   IconSun,
   IconTrash,
   IconX,
@@ -52,6 +56,26 @@ type RestoreState = "idle" | "doing" | "none";
 function fileNameOf(path: string): string {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+/** 置顶组之外的排序键:最近更新 / 最近复制 / 最常复制 */
+function compareForSort(mode: SortMode, a: PromptItem, b: PromptItem): number {
+  if (mode === "recent") {
+    const ta = a.lastCopiedAt ? Date.parse(a.lastCopiedAt) : Number.NaN;
+    const tb = b.lastCopiedAt ? Date.parse(b.lastCopiedAt) : Number.NaN;
+    const hasA = !Number.isNaN(ta);
+    const hasB = !Number.isNaN(tb);
+    if (hasA !== hasB) return hasA ? -1 : 1;
+    if (hasA && hasB && tb !== ta) return tb - ta;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  }
+  if (mode === "most") {
+    const ca = a.copyCount ?? 0;
+    const cb = b.copyCount ?? 0;
+    if (cb !== ca) return cb - ca;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  }
+  return b.updatedAt.localeCompare(a.updatedAt);
 }
 
 function ThemeToggle() {
@@ -137,6 +161,18 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [batchPurgeOpen, setBatchPurgeOpen] = useState(false);
   const [dropActive, setDropActive] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sortMode, setSortModeState] = useState<SortMode>(() => {
+    try {
+      const saved = localStorage.getItem("pv-sort");
+      if (saved === "updated" || saved === "recent" || saved === "most") {
+        return saved;
+      }
+    } catch {
+      /* ignore */
+    }
+    return "updated";
+  });
   const [toast, setToast] = useState<Toast | null>(null);
 
   const dataPathRef = useRef<string | null>(null);
@@ -147,6 +183,15 @@ export default function App() {
   const showToast = useCallback((text: string, kind: "ok" | "err" = "ok") => {
     setToast({ text, kind });
     window.setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const setSortMode = useCallback((mode: SortMode) => {
+    setSortModeState(mode);
+    try {
+      localStorage.setItem("pv-sort", mode);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const persist = useCallback(
@@ -192,6 +237,19 @@ export default function App() {
     await loadFrom(chosen);
     return true;
   }, [loadFrom]);
+
+  /** 静默重读磁盘:快速拾取窗口写入统计后,同步到主窗口内存 */
+  const refreshFromDisk = useCallback(async () => {
+    const p = dataPathRef.current;
+    if (!p) return;
+    const raw = await readDataFile(p);
+    if (raw === null) return;
+    try {
+      setItems(coerceItems(JSON.parse(raw)));
+    } catch {
+      /* 读到损坏内容时保持现状,交由用户下一步操作决定 */
+    }
+  }, []);
 
   useEffect(() => {
     if (bootstrapped.current) return;
@@ -242,12 +300,24 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      try {
+        const u3 = await listen("stats-changed", () => {
+          void refreshFromDisk();
+        });
+        if (disposed) {
+          u3();
+          return;
+        }
+        unlistens.push(u3);
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       disposed = true;
       unlistens.forEach((u) => u());
     };
-  }, [showToast]);
+  }, [refreshFromDisk, showToast]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -303,10 +373,9 @@ export default function App() {
     }
     return [...list].sort(
       (a, b) =>
-        Number(b.pinned) - Number(a.pinned) ||
-        b.updatedAt.localeCompare(a.updatedAt),
+        Number(b.pinned) - Number(a.pinned) || compareForSort(sortMode, a, b),
     );
-  }, [trashOpen, trashItems, liveItems, search, activeTag]);
+  }, [trashOpen, trashItems, liveItems, search, activeTag, sortMode]);
 
   const selectedItem = selectedId
     ? (items.find((i) => i.id === selectedId) ?? null)
@@ -483,7 +552,8 @@ export default function App() {
         copyTarget ||
         purgeTarget ||
         importCandidate ||
-        batchPurgeOpen
+        batchPurgeOpen ||
+        settingsOpen
       );
       if (e.key === "Escape" && !typing && !modalOpen && selectedIds.size > 0) {
         e.preventDefault();
@@ -510,6 +580,7 @@ export default function App() {
     purgeTarget,
     importCandidate,
     batchPurgeOpen,
+    settingsOpen,
     selectedIds.size,
     filtered.length,
     clearSelection,
@@ -609,15 +680,35 @@ export default function App() {
     [showToast],
   );
 
+  /** 复制成功后更新内存计数,再让 Rust 串行写盘(失败静默,复制优先) */
+  const bumpCopyStat = useCallback(async (id: string) => {
+    const now = nowIso();
+    setItems((cur) =>
+      cur.map((it) =>
+        it.id === id
+          ? { ...it, copyCount: (it.copyCount ?? 0) + 1, lastCopiedAt: now }
+          : it,
+      ),
+    );
+    const p = dataPathRef.current;
+    if (!p) return;
+    try {
+      await bumpCopyStats(p, id);
+    } catch {
+      /* 统计失败不影响复制;之后任意一次正常写盘会带上内存里的计数 */
+    }
+  }, []);
+
   const handleCopy = useCallback(
     async (item: PromptItem) => {
       if (extractPlaceholders(item.body).length > 0) {
         setCopyTarget(item);
         return;
       }
-      await copyWithToast(item.body, "已复制到剪贴板");
+      const ok = await copyWithToast(item.body, "已复制到剪贴板");
+      if (ok) await bumpCopyStat(item.id);
     },
-    [copyWithToast],
+    [copyWithToast, bumpCopyStat],
   );
 
   const handleCopyFilled = useCallback(
@@ -626,14 +717,29 @@ export default function App() {
       const filled = fillPlaceholders(copyTarget.body, values);
       const ok = await copyWithToast(filled, "已复制到剪贴板(变量已填充)");
       setCopyTarget(null);
-      if (ok) {
-        // 记住本次填写值,下次弹窗预填
-        await persist(
-          items.map((it) =>
-            it.id === copyTarget.id ? { ...it, lastValues: values } : it,
-          ),
-        );
+      if (!ok) return;
+      // 统计先由 Rust 串行写盘,再把"上次填写值 + 本次计数"一次性落盘
+      const p = dataPathRef.current;
+      if (p) {
+        try {
+          await bumpCopyStats(p, copyTarget.id);
+        } catch {
+          /* 统计失败不影响复制 */
+        }
       }
+      const now = nowIso();
+      await persist(
+        items.map((it) =>
+          it.id === copyTarget.id
+            ? {
+                ...it,
+                lastValues: values,
+                copyCount: (it.copyCount ?? 0) + 1,
+                lastCopiedAt: now,
+              }
+            : it,
+        ),
+      );
     },
     [copyTarget, items, copyWithToast, persist],
   );
@@ -782,10 +888,17 @@ export default function App() {
         if (!cur) {
           byId.set(inc.id, inc);
           added++;
-        } else if (isNewer(inc.updatedAt, cur.updatedAt)) {
-          byId.set(inc.id, inc);
-          updated++;
+          continue;
         }
+        const record = isNewer(inc.updatedAt, cur.updatedAt) ? inc : cur;
+        if (record === inc) updated++;
+        // 统计字段单独合并:次数取大、最近复制时间取新
+        const copyCount = Math.max(cur.copyCount ?? 0, inc.copyCount ?? 0);
+        const lastCopiedAt = newerIso(cur.lastCopiedAt, inc.lastCopiedAt);
+        const merged: PromptItem = { ...record };
+        if (copyCount > 0) merged.copyCount = copyCount;
+        if (lastCopiedAt) merged.lastCopiedAt = lastCopiedAt;
+        byId.set(inc.id, merged);
       }
       await persist([...byId.values()]);
       clearSelection();
@@ -900,6 +1013,13 @@ export default function App() {
           <button className="btn" onClick={() => void handleExport()}>
             <IconExport size={15} /> 导出
           </button>
+          <button
+            className="icon-btn"
+            title="设置(全局热键)"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <IconSettings size={16} />
+          </button>
           <ThemeToggle />
         </div>
       </header>
@@ -909,6 +1029,8 @@ export default function App() {
           items={filtered}
           total={trashOpen ? trashItems.length : liveItems.length}
           trashOpen={trashOpen}
+          sortMode={sortMode}
+          onSortChange={setSortMode}
           selectedId={selectedId}
           selectedIds={selectedIds}
           onRowClick={handleRowClick}
@@ -988,6 +1110,12 @@ export default function App() {
           count={importCandidate.length}
           onApply={(how) => void handleImportApply(how)}
           onCancel={() => setImportCandidate(null)}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          showToast={showToast}
         />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}

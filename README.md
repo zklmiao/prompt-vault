@@ -40,6 +40,7 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 | 🧩 | **变量占位符** | 正文写 `{{变量}}`，复制前弹窗逐个填空（同名只填一次、留空保持原样），并**记忆上次填写值**；正文中高亮显示 |
 | ⚡ | **快速拾取** | `Alt+Q` 在任意界面唤出迷你面板：输入过滤、`↑↓` 选择、`Enter` 复制并自动隐藏 |
 | 📌 | **整理** | 星标置顶、自由标签、来源与备注字段 |
+| 📊 | **使用统计** | 自动记录每条 prompt 的复制次数与最近复制时间，列表可按「最近更新 / 最近复制 / 最常复制」排序 |
 | 🗑 | **回收站** | 删除先进回收站可随时恢复，彻底删除才二次确认 |
 | ☑️ | **批量操作** | 多选后批量加标签、批量移入回收站/恢复、批量导出所选（Ctrl/Shift 多选、Ctrl+A 全选、Esc 取消） |
 | 🎨 | **体验** | 暗色/亮色主题（跟随系统）、托盘常驻、窗口位置记忆、全中文界面 |
@@ -58,6 +59,8 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 | `Ctrl+Enter` | 编辑器 | 保存 |
 | `↑` `↓` / `Enter` / `Esc` | 快速拾取 | 选择 / 复制并关闭 / 关闭 |
 | `Esc` | 弹窗 | 取消 |
+
+> 两个全局热键可以在应用内 **设置（右上角 ⚙）** 中修改：点击输入框直接录制组合键，保存后立即生效、无需重启；若组合被其他应用占用会提示并保留旧键。
 
 > 点窗口 ✕ = 收进系统托盘（不退出）；托盘**左键**唤出/收起，**右键菜单**可打开主窗口或真正退出。
 
@@ -133,7 +136,9 @@ npm run tauri build
       "createdAt": "2026-10-20T09:00:00.000Z",
       "updatedAt": "2026-10-24T02:10:00.000Z",
       "lastValues": { "关注点": "并发安全" },
-      "deletedAt": null
+      "deletedAt": null,
+      "copyCount": 12,
+      "lastCopiedAt": "2026-10-27T09:12:00.000Z"
     }
   ]
 }
@@ -210,7 +215,7 @@ npx vite --config preview/vite.preview.config.ts
 - [ ] 自绘标题栏
 - [x] 拖拽导入（`.json` / 纯文本）
 - [x] 批量操作（多选打标签、批量移入回收站/恢复、批量导出）
-- [ ] 使用统计（最近使用排序）
+- [x] 使用统计（复制次数、最近复制、按使用排序）
 - [ ] 数据量过千后评估 SQLite + FTS5
 
 ---
@@ -232,6 +237,7 @@ npx vite --config preview/vite.preview.config.ts
 - **Find** them with instant full-text search, clickable tag filters, and tag autocomplete
 - **Fill** `{{variables}}` in a modal before copying — values are remembered for next time
 - **Copy** from a global quick-pick palette (`Alt+Q`): type, `↑↓`, `Enter` — done
+- **Learn** from usage: copy counts and recent-copy timestamps, with usage-based sorting
 - **Stay safe**: single JSON file, atomic writes, automatic `.bak` backups, one-click recovery
 - **Feel good**: tray-resident, dark/light theme, trash bin, window-position memory, all in Chinese UI
 

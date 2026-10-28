@@ -15,6 +15,8 @@ const seed: DataFile = {
       pinned: true,
       createdAt: "2026-10-20T09:00:00.000Z",
       updatedAt: "2026-10-24T02:10:00.000Z",
+      copyCount: 12,
+      lastCopiedAt: "2026-10-27T09:12:00.000Z",
     },
     {
       id: "2",
@@ -37,6 +39,8 @@ const seed: DataFile = {
       pinned: false,
       createdAt: "2026-10-18T09:00:00.000Z",
       updatedAt: "2026-10-22T08:00:00.000Z",
+      copyCount: 5,
+      lastCopiedAt: "2026-10-26T03:40:00.000Z",
     },
     {
       id: "4",
@@ -117,6 +121,19 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
       current = String(args?.contents ?? "");
       console.log("[mock] write_data", current.length, "chars");
       return null;
+    case "bump_copy_stats": {
+      const data = JSON.parse(current) as {
+        prompts?: Array<Record<string, unknown>>;
+      };
+      const item = data.prompts?.find((p) => p.id === args?.id);
+      if (!item) throw new Error("[mock] bump: item not found");
+      item.copyCount =
+        (typeof item.copyCount === "number" ? item.copyCount : 0) + 1;
+      item.lastCopiedAt = new Date().toISOString();
+      current = JSON.stringify(data, null, 2);
+      console.log("[mock] bump_copy_stats", args?.id, "->", item.copyCount);
+      return null;
+    }
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
   }
