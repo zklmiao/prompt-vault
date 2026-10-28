@@ -86,8 +86,8 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 | 文件 | 说明 |
 |---|---|
-| `PromptVault-安装包.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
-| `PromptVault-便携版.exe` | 单文件绿色版，放到哪都能双击运行 |
+| `PromptVault-0.1.0-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
+| `PromptVault-0.1.0-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
 
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
