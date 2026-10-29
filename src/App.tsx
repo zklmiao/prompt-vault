@@ -11,17 +11,20 @@ import {
   copyToClipboard,
   firstRunDefaultPath,
   getDataPath,
+  getHotkeys,
   pathMeta,
   readClipboard,
   readDataFile,
   restoreBackup,
   setDataPath,
   writeDataFile,
+  type Hotkeys,
 } from "./api";
 import {
   coerceItems,
   extractPlaceholders,
   fillPlaceholders,
+  formatHotkey,
   isComposingEvent,
   isNewer,
   matchPrompt,
@@ -40,6 +43,8 @@ import PlaceholderModal from "./components/PlaceholderModal";
 import ConfirmModal from "./components/ConfirmModal";
 import ImportChoiceModal from "./components/ImportChoiceModal";
 import SettingsModal from "./components/SettingsModal";
+import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
+import CheatsheetModal from "./components/CheatsheetModal";
 import {
   IconClipboard,
   IconExport,
@@ -48,8 +53,10 @@ import {
   IconPlus,
   IconSearch,
   IconSettings,
+  IconSparkles,
   IconSun,
   IconTrash,
+  IconUndo,
   IconX,
 } from "./components/icons";
 
@@ -81,17 +88,17 @@ function compareForSort(mode: SortMode, a: PromptItem, b: PromptItem): number {
   return b.updatedAt.localeCompare(a.updatedAt);
 }
 
-function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(currentTheme());
-  const toggle = () => {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    applyTheme(next);
-    setTheme(next);
-  };
+function ThemeToggle({
+  theme,
+  onToggle,
+}: {
+  theme: Theme;
+  onToggle: () => void;
+}) {
   return (
     <button
       className="icon-btn"
-      onClick={toggle}
+      onClick={onToggle}
       title={theme === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
     >
       {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
@@ -177,6 +184,13 @@ export default function App() {
     return "updated";
   });
   const [toast, setToast] = useState<Toast | null>(null);
+  const [theme, setTheme] = useState<Theme>(() => currentTheme());
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+  const [hotkeys, setHotkeys] = useState<Hotkeys>({
+    quickpick: "alt+q",
+    clipboard_new: "alt+shift+n",
+  });
 
   const dataPathRef = useRef<string | null>(null);
   const bootstrapped = useRef(false);
@@ -196,6 +210,27 @@ export default function App() {
       /* ignore */
     }
   }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((cur) => {
+      const next: Theme = cur === "dark" ? "light" : "dark";
+      applyTheme(next);
+      return next;
+    });
+  }, []);
+
+  /** 读取全局热键配置;浏览器预览等无 Tauri 环境时保持默认值 */
+  const loadHotkeys = useCallback(async () => {
+    try {
+      setHotkeys(await getHotkeys());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHotkeys();
+  }, [loadHotkeys]);
 
   const persist = useCallback(
     async (next: PromptItem[]) => {
@@ -371,6 +406,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isComposingEvent(e)) return;
+      // 命令面板 / 速查表打开时不响应窗口快捷键
+      if (paletteOpen || cheatsheetOpen) return;
       if (e.ctrlKey && !e.shiftKey && !e.altKey) {
         if (e.key === "n" || e.key === "N") {
           e.preventDefault();
@@ -384,7 +421,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [paletteOpen, cheatsheetOpen]);
 
   const allTags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -610,7 +647,9 @@ export default function App() {
         purgeTarget ||
         importCandidate ||
         batchPurgeOpen ||
-        settingsOpen
+        settingsOpen ||
+        paletteOpen ||
+        cheatsheetOpen
       );
       if (e.key === "Escape" && !typing && !modalOpen && selectedIds.size > 0) {
         e.preventDefault();
@@ -638,10 +677,66 @@ export default function App() {
     importCandidate,
     batchPurgeOpen,
     settingsOpen,
+    paletteOpen,
+    cheatsheetOpen,
     selectedIds.size,
     filtered.length,
     clearSelection,
     selectAllFiltered,
+  ]);
+
+  // 命令面板(Ctrl+K)与快捷键速查表(?)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isComposingEvent(e)) return;
+      const target = e.target as HTMLElement | null;
+      const typing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const otherModalOpen = !!(
+        copyTarget ||
+        purgeTarget ||
+        importCandidate ||
+        batchPurgeOpen ||
+        settingsOpen
+      );
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.key === "k" || e.key === "K")
+      ) {
+        e.preventDefault();
+        if (paletteOpen) {
+          setPaletteOpen(false);
+          return;
+        }
+        if (otherModalOpen || cheatsheetOpen) return;
+        setPaletteOpen(true);
+        return;
+      }
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
+        e.preventDefault();
+        if (cheatsheetOpen) {
+          setCheatsheetOpen(false);
+          return;
+        }
+        if (otherModalOpen || paletteOpen) return;
+        setCheatsheetOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    paletteOpen,
+    cheatsheetOpen,
+    copyTarget,
+    purgeTarget,
+    importCandidate,
+    batchPurgeOpen,
+    settingsOpen,
   ]);
 
   const handleSave = useCallback(
@@ -995,6 +1090,119 @@ export default function App() {
     }
   }, [loadError, loadFrom, showToast]);
 
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const closeThen = (fn: () => void) => () => {
+      setPaletteOpen(false);
+      fn();
+    };
+    return [
+      {
+        id: "new",
+        group: "收藏",
+        label: "新建 prompt",
+        keywords: ["new", "create", "xinjian", "新建"],
+        shortcut: "Ctrl+N",
+        icon: <IconPlus size={15} />,
+        run: closeThen(startNew),
+      },
+      {
+        id: "clipboard-new",
+        group: "收藏",
+        label: "从剪贴板新建",
+        keywords: ["clipboard", "paste", "剪贴板", "粘贴"],
+        shortcut: formatHotkey(hotkeys.clipboard_new),
+        icon: <IconClipboard size={15} />,
+        run: closeThen(() => void newFromClipboard()),
+      },
+      {
+        id: "import",
+        group: "收藏",
+        label: "导入 JSON",
+        keywords: ["import", "json", "导入"],
+        icon: <IconImport size={15} />,
+        run: closeThen(() => void handleImportPick()),
+      },
+      {
+        id: "export",
+        group: "收藏",
+        label: "导出 JSON",
+        keywords: ["export", "json", "导出"],
+        icon: <IconExport size={15} />,
+        run: closeThen(() => void handleExport()),
+      },
+      {
+        id: "trash",
+        group: "收藏",
+        label: trashOpen ? "返回收藏列表" : "打开回收站",
+        keywords: ["trash", "recycle", "回收站", "返回"],
+        icon: trashOpen ? <IconUndo size={15} /> : <IconTrash size={15} />,
+        run: closeThen(toggleTrash),
+      },
+      {
+        id: "theme",
+        group: "视图",
+        label: theme === "dark" ? "切换到亮色模式" : "切换到暗色模式",
+        keywords: ["theme", "dark", "light", "主题", "暗色", "亮色"],
+        icon: theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />,
+        run: closeThen(toggleTheme),
+      },
+      {
+        id: "sort-updated",
+        group: "视图",
+        label: "排序:最近更新",
+        keywords: ["sort", "updated", "排序", "更新"],
+        checked: sortMode === "updated",
+        run: closeThen(() => setSortMode("updated")),
+      },
+      {
+        id: "sort-recent",
+        group: "视图",
+        label: "排序:最近复制",
+        keywords: ["sort", "recent", "排序", "复制"],
+        checked: sortMode === "recent",
+        run: closeThen(() => setSortMode("recent")),
+      },
+      {
+        id: "sort-most",
+        group: "视图",
+        label: "排序:最常复制",
+        keywords: ["sort", "most", "排序", "常用"],
+        checked: sortMode === "most",
+        run: closeThen(() => setSortMode("most")),
+      },
+      {
+        id: "cheatsheet",
+        group: "视图",
+        label: "快捷键速查表",
+        keywords: ["shortcut", "keys", "快捷键", "帮助", "?"],
+        shortcut: "?",
+        icon: <IconSparkles size={15} />,
+        run: closeThen(() => setCheatsheetOpen(true)),
+      },
+      {
+        id: "settings",
+        group: "应用",
+        label: "打开设置",
+        keywords: ["settings", "hotkey", "设置", "热键"],
+        hint: `快速拾取 ${formatHotkey(hotkeys.quickpick)}`,
+        icon: <IconSettings size={15} />,
+        run: closeThen(() => setSettingsOpen(true)),
+      },
+    ];
+  }, [
+    trashOpen,
+    theme,
+    sortMode,
+    hotkeys,
+    startNew,
+    newFromClipboard,
+    handleImportPick,
+    handleExport,
+    toggleTrash,
+    toggleTheme,
+    setSortMode,
+  ]);
+
   if (setupFailed) {
     return (
       <div className="app">
@@ -1081,7 +1289,7 @@ export default function App() {
           >
             <IconSettings size={16} />
           </button>
-          <ThemeToggle />
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </div>
       </header>
 
@@ -1175,8 +1383,23 @@ export default function App() {
       )}
       {settingsOpen && (
         <SettingsModal
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            void loadHotkeys();
+          }}
           showToast={showToast}
+        />
+      )}
+      {paletteOpen && (
+        <CommandPalette
+          commands={paletteCommands}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+      {cheatsheetOpen && (
+        <CheatsheetModal
+          hotkeys={hotkeys}
+          onClose={() => setCheatsheetOpen(false)}
         />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}

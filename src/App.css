@@ -1360,3 +1360,165 @@ mark.hl {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============ 命令面板 ============ */
+.palette {
+  width: 640px;
+  max-width: calc(100vw - 48px);
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: pv-pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+.palette .qp-input-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.palette-group + .palette-group {
+  margin-top: 4px;
+}
+
+.palette-group-title {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.palette-row.active {
+  background: var(--accent-soft);
+}
+
+.palette-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.palette-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-check {
+  color: var(--accent);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.palette-hint {
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.palette-empty {
+  padding: 26px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ============ 键帽与快捷键速查表 ============ */
+.kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--panel-hover);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  text-align: center;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.cheat-sheet {
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+
+.cheat-group {
+  margin-top: 12px;
+}
+
+.cheat-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.cheat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.cheat-row:last-child {
+  border-bottom: none;
+}
+
+.cheat-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cheat-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cheat-sep {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cheat-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}

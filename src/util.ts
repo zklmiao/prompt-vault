@@ -282,3 +282,29 @@ export function matchPrompt(query: string, item: PromptItem): PromptMatch | null
 
   return { score, title, tags, bodySnippet };
 }
+
+/**
+ * 把配置里的热键串(如 "alt+shift+n")格式化成展示文本(Alt+Shift+N)。
+ * 设置弹窗、命令面板与快捷键速查表共用,保证展示一致。
+ */
+export function formatHotkey(hotkey: string): string {
+  return hotkey
+    .split("+")
+    .map((part) => {
+      const p = part.trim().toLowerCase();
+      if (p === "alt") return "Alt";
+      if (p === "ctrl" || p === "control" || p === "commandorcontrol") return "Ctrl";
+      if (p === "shift") return "Shift";
+      if (p === "super" || p === "win" || p === "meta") return "Win";
+      if (p === "space") return "Space";
+      if (p === "arrowup") return "↑";
+      if (p === "arrowdown") return "↓";
+      if (p === "arrowleft") return "←";
+      if (p === "arrowright") return "→";
+      if (/^f\d{1,2}$/.test(p)) return p.toUpperCase();
+      return p.length === 1
+        ? p.toUpperCase()
+        : p.charAt(0).toUpperCase() + p.slice(1);
+    })
+    .join("+");
+}

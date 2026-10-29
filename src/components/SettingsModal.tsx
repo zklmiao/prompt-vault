@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import { getHotkeys, setHotkeys } from "../api";
-import { isComposingEvent } from "../util";
+import { isComposingEvent, formatHotkey } from "../util";
 
 interface Props {
   onClose: () => void;
@@ -11,27 +11,6 @@ interface Props {
 const DEFAULTS = { quickpick: "alt+q", clipboard_new: "alt+shift+n" };
 
 const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta", "CapsLock"]);
-
-/** "alt+shift+n" → "Alt+Shift+N";也用于展示配置里手写的大写形式 */
-function displayOf(hotkey: string): string {
-  return hotkey
-    .split("+")
-    .map((part) => {
-      const p = part.trim().toLowerCase();
-      if (p === "alt") return "Alt";
-      if (p === "ctrl" || p === "control" || p === "commandorcontrol") return "Ctrl";
-      if (p === "shift") return "Shift";
-      if (p === "super" || p === "win" || p === "meta") return "Win";
-      if (p === "space") return "Space";
-      if (p === "arrowup") return "↑";
-      if (p === "arrowdown") return "↓";
-      if (p === "arrowleft") return "←";
-      if (p === "arrowright") return "→";
-      if (/^f\d{1,2}$/.test(p)) return p.toUpperCase();
-      return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
-    })
-    .join("+");
-}
 
 function modifiersOf(e: React.KeyboardEvent): string[] {
   const mods: string[] = [];
@@ -76,7 +55,7 @@ function HotkeyField({
       <span className="hotkey-label">{label}</span>
       <input
         className={"hotkey-input" + (capturing ? " capturing" : "")}
-        value={capturing ? "按下组合键…" : displayOf(value)}
+        value={capturing ? "按下组合键…" : formatHotkey(value)}
         readOnly
         onClick={() => {
           setCapturing(true);
