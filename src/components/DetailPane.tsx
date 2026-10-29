@@ -149,7 +149,7 @@ export default function DetailPane({
 
   return (
     <section className="detail">
-      <div className="detail-inner">
+      <div className="detail-inner stagger" key={item.id}>
         <div className="detail-head">
           <h2 className="detail-title">
             {!trashOpen && item.pinned && <span className="star">★ </span>}
