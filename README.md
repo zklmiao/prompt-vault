@@ -217,7 +217,7 @@ npx vite --config preview/vite.preview.config.ts
 - [x] 拖拽导入（`.json` / 纯文本）
 - [x] 批量操作（多选打标签、批量移入回收站/恢复、批量导出）
 - [x] 使用统计（复制次数、最近复制、按使用排序）
-- [ ] UI/UX 精修：QuickPick 2.0、Mica 材质、命令面板等（详见 [docs/backlog.md](docs/backlog.md)）
+- [ ] UI/UX 精修：命令面板、占位符实时预览等（详见 [docs/backlog.md](docs/backlog.md)）
 - [ ] 数据量过千后评估 SQLite + FTS5
 
 ---
