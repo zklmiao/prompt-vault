@@ -13,7 +13,7 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 <img src="docs/screenshots/detail-dark.png" width="86%" alt="Prompt Vault 主界面" />
 
-<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
 
 </div>
 
@@ -36,15 +36,16 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 | | 能力 | 说明 |
 |---|---|---|
 | 📥 | **收集** | 手动新建、`Alt+Shift+N` 剪贴板速存、导入 JSON、拖拽 `.json` 导入 / 拖文本直接新建 |
-| 🔍 | **检索** | 标题/正文/标签/备注全字段即时搜索；点标签直接筛选；标签输入自动补全 |
-| 🧩 | **变量占位符** | 正文写 `{{变量}}`，复制前弹窗逐个填空（同名只填一次、留空保持原样），并**记忆上次填写值**；正文中高亮显示 |
-| ⚡ | **快速拾取** | `Alt+Q` 在任意界面唤出双栏面板：模糊搜索 + 命中高亮、右侧实时预览、`Tab` 直接进入编辑、复制后有确认反馈并自动隐藏 |
-| ⌘ | **命令面板** | `Ctrl+K` 模糊搜索执行全部操作（新建/导入/导出/排序/主题/设置…）；`?` 打开快捷键速查表 |
+| 🎓 | **上手** | 首次启动给出 3 步引导（收集 / 试占位符 / 记热键），可一键跳过；空态始终给出下一步动作 |
+| 🔍 | **检索** | 标题/正文/标签/备注即时模糊搜索（子序列匹配、命中词高亮）；点标签直接筛选；标签输入自动补全 |
+| 🧩 | **变量占位符** | 正文写 `{{变量}}`，复制前弹窗逐个填空（同名只填一次、留空保持原样），并**记忆上次填写值**；变量在正文中高亮，详情显示变量数量 |
+| ⚡ | **快速拾取** | `Alt+Q` 在任意界面唤出双栏面板：模糊搜索 + 命中高亮、右侧实时预览；空查询展示「最近复制 / 最常复制」；`Tab` 直接进入编辑，复制后有确认反馈并自动隐藏 |
+| ⌘ | **命令面板** | `Ctrl+K` 模糊搜索执行常用操作（新建/导入/导出/排序/主题/设置…）；`?` 打开快捷键速查表 |
 | 📌 | **整理** | 星标置顶、自由标签、来源与备注字段 |
 | 📊 | **使用统计** | 自动记录每条 prompt 的复制次数与最近复制时间，列表可按「最近更新 / 最近复制 / 最常复制」排序 |
 | 🗑 | **回收站** | 删除先进回收站可随时恢复，彻底删除才二次确认 |
 | ☑️ | **批量操作** | 多选后批量加标签、批量移入回收站/恢复、批量导出所选（Ctrl/Shift 多选、Ctrl+A 全选、Esc 取消） |
-| 🎨 | **体验** | 自绘标题栏、暗色/亮色主题（跟随系统）、托盘常驻、窗口位置记忆、全中文界面 |
+| 🎨 | **体验** | 自绘标题栏、暗色/亮色主题（跟随系统）、托盘常驻、窗口位置记忆、详情切换级联淡入、**中文输入法组字安全**（拼音选字按 Enter 不会误触发业务动作）、全中文界面 |
 | 💾 | **数据安全** | 单 JSON 文件 + 原子写入 + 每次写入前自动 `.bak` 备份，损坏时可一键恢复 |
 
 ---
@@ -82,6 +83,12 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 |:---:|:---:|
 | <img src="docs/screenshots/placeholder-modal.png" alt="变量填空弹窗" /> | <img src="docs/screenshots/trash.png" alt="回收站" /> |
 
+| 快速拾取（`Alt+Q`） | 命令面板（`Ctrl+K`） |
+|:---:|:---:|
+| <img src="docs/screenshots/quickpick.png" alt="快速拾取面板" /> | <img src="docs/screenshots/command-palette.png" alt="命令面板" /> |
+
+<img src="docs/screenshots/onboarding.png" width="86%" alt="首次启动引导" />
+
 </div>
 
 ---
@@ -99,6 +106,8 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
+
+> 当前源码版本为 **0.1.9**；Releases 中最新正式发布仍是 v0.1.0。v0.1.9 发布后，上表文件名会同步为 `PromptVault-0.1.9-*`。
 
 ### 方式二：从源码构建
 
@@ -121,6 +130,7 @@ npm run tauri build
 - **所有数据只存在本地**：一个 JSON 文件，内容完全透明，随时可用任意编辑器查看
 - **原子写入**：临时文件 `sync` 落盘后经 `MoveFileEx(REPLACE_EXISTING)` 原地替换，不存在写一半的中间态
 - **自动备份**：每次写入前旧文件保存为 `prompts.json.bak`；数据解析失败时应用暂停读写，并可一键从 `.bak` 恢复
+- **配置同样本地**：`%APPDATA%\prompt-vault\config.json` 只保存数据文件路径、窗口位置与全局热键，不包含收藏内容
 - **无网络请求**：应用不发起任何外部请求，不采集任何信息
 
 数据文件结构：
@@ -156,14 +166,16 @@ npm run tauri build
 flowchart LR
   U([用户]) --> M["主窗口<br/>两栏 UI"]
   U --> Q["快速拾取<br/>Alt+Q"]
+  U --> P["命令面板<br/>Ctrl+K"]
 
   M --> F["React 19 + TypeScript"]
   Q --> F
+  P --> F
 
   F -- "Tauri invoke" --> R["Rust 命令层"]
   R --> D[("prompts.json")]
   R --> B[("prompts.json.bak")]
-  R --> C[("config.json<br/>数据路径 · 窗口位置")]
+  R --> C[("config.json<br/>数据路径 · 窗口位置 · 热键")]
 
   H["全局热键<br/>Alt+Q / Alt+Shift+N"] --> Q
   T["系统托盘"] --> M
@@ -172,24 +184,30 @@ flowchart LR
 ```text
 prompt-vault/
 ├─ src/                        # React 前端
-│  ├─ App.tsx                  # 主窗口:两栏、搜索、回收站、导入导出
-│  ├─ QuickPick.tsx            # 快速拾取面板
-│  ├─ components/              # 侧栏、编辑器、弹窗、SVG 图标…
-│  ├─ util.ts                  # 占位符解析、数据纠偏、合并比较
+│  ├─ App.tsx                  # 主窗口:两栏、搜索、批量、回收站、导入导出、命令面板接线
+│  ├─ QuickPick.tsx            # 快速拾取:双栏预览、模糊搜索、复制确认
+│  ├─ components/              # TitleBar / Sidebar / DetailPane / CommandPalette /
+│  │                           # CheatsheetModal / Onboarding / BatchPanel / SettingsModal …
+│  ├─ util.ts                  # 模糊匹配、占位符解析、数据纠偏、热键格式化
+│  ├─ theme.ts / window.ts     # 主题与窗口模式(含浏览器预览分流)
 │  ├─ api.ts                   # Tauri API 封装
 │  └─ App.css                  # 主题令牌(亮/暗)+ 全部样式
 ├─ src-tauri/
-│  ├─ src/lib.rs               # 托盘、全局热键、原子写入、窗口管理
+│  ├─ src/lib.rs               # 托盘、全局热键、原子写入、窗口与统计命令
 │  └─ tauri.conf.json
-├─ preview/                    # 浏览器预览夹具(mock 掉 Tauri API)
-└─ docs/screenshots/
+├─ preview/                    # 浏览器预览夹具(?quickpick=1 / ?empty=1)
+├─ docs/
+│  ├─ backlog.md               # 待办与路线图
+│  └─ screenshots/
+└─ AGENTS.md                   # 协作约定(给维护者 / agents)
 ```
 
 **设计取舍**
 
 - 数据用**单个 JSON 文件**而不是数据库：几十到几百条的规模下零运维、可读、可备份；数据量上千后再评估 SQLite + FTS5
 - **不引入 Agent/UI 框架**：界面是手写 React + CSS 变量，按钮是内联 SVG 图标，构建产物小、无风格依赖
-- 占位符记忆、置顶、回收站等全部落在同一个数据文件里，**无旁路状态**
+- **第二层入口收敛到命令面板**：新能力优先进入命令面板或快捷键，顶栏只保留高频动作，避免界面随功能膨胀
+- 占位符记忆、置顶、回收站、复制统计全部落在同一个数据文件里，**无旁路状态**
 
 ---
 
@@ -206,22 +224,23 @@ npx vite --config preview/vite.preview.config.ts
 
 - 前端严格模式 TypeScript(`tsc --noEmit` 零错误)
 - 图标源图 `app-icon.png`，修改后 `npx tauri icon app-icon.png` 重新生成全套
-- `preview/` 是开发预览夹具，不参与正式构建(tsconfig 只含 `src`)
+- `preview/` 是开发预览夹具，不参与正式构建(tsconfig 只含 `src`)，默认端口 **4173**
+  - `?quickpick=1` 单独预览快速拾取窗口；`?empty=1` 以空数据启动（验证首次引导）
+- 待办与路线图见 [`docs/backlog.md`](docs/backlog.md)；协作约定见 [`AGENTS.md`](AGENTS.md)
 
 ---
 
 ## 🗺 路线图
 
-- [x] 托盘常驻 + 全局快速拾取（`Alt+Q`）
-- [x] 剪贴板速存（`Alt+Shift+N`）
-- [x] 全局热键可配置（设置弹窗）
+- [x] 托盘常驻 + 全局快速拾取（`Alt+Q`，双栏预览与模糊搜索）
+- [x] 剪贴板速存 / 全局热键可配置
 - [x] 占位符填空与填写记忆
-- [x] 回收站 / 暗色模式 / 窗口位置记忆
-- [x] 自绘标题栏
-- [x] 拖拽导入（`.json` / 纯文本）
-- [x] 批量操作（多选打标签、批量移入回收站/恢复、批量导出）
-- [x] 使用统计（复制次数、最近复制、按使用排序）
-- [ ] UI/UX 精修：命令面板、占位符实时预览等（详见 [docs/backlog.md](docs/backlog.md)）
+- [x] 回收站 / 暗色模式 / 窗口位置记忆 / 自绘标题栏
+- [x] 拖拽导入 / 批量操作 / 使用统计
+- [x] 命令面板（`Ctrl+K`）与快捷键速查表（`?`）
+- [x] 首次启动引导 / 详情级联淡入 / 中文输入法组字保护
+- [ ] 占位符实时预览、搜索命中片段、右键菜单、标签配色（详见 [docs/backlog.md](docs/backlog.md)）
+- [ ] 发布 v0.1.9 Release（代码与构建已就绪，README 下载表待同步）
 - [ ] 数据量过千后评估 SQLite + FTS5
 
 ---
@@ -239,13 +258,15 @@ npx vite --config preview/vite.preview.config.ts
 
 **Prompt Vault** is a local-first prompt manager for Windows, built with Tauri 2 + React 19 + TypeScript.
 
-- **Collect** prompts manually, from the clipboard (`Alt+Shift+N`), or via JSON import
-- **Find** them with instant full-text search, clickable tag filters, and tag autocomplete
+- **Collect** prompts manually, from the clipboard (`Alt+Shift+N`), via JSON import, or by drag & drop
+- **Find** them with instant fuzzy search (highlighted matches), clickable tag filters, and tag autocomplete
 - **Fill** `{{variables}}` in a modal before copying — values are remembered for next time
-- **Copy** from a global quick-pick palette (`Alt+Q`): type, `↑↓`, `Enter` — done
-- **Learn** from usage: copy counts and recent-copy timestamps, with usage-based sorting
+- **Copy** from a global quick-pick palette (`Alt+Q`): two-pane preview, recent/most-used sections, `↑↓`, `Enter` — done
+- **Command everything** with `Ctrl+K`; press `?` for the shortcut cheatsheet
+- **Organize** with pins, tags, batch actions, a trash bin, and usage stats (copy count / recency sorting)
+- **Get started fast**: a 3-step first-run guide (collect · variables · hotkey) that can be skipped
 - **Stay safe**: single JSON file, atomic writes, automatic `.bak` backups, one-click recovery
-- **Feel good**: tray-resident, dark/light theme, trash bin, window-position memory, all in Chinese UI
+- **Feel good**: tray-resident, custom title bar, dark/light theme, window-position memory, all in Chinese UI
 
 ```bash
 npm install && npm run tauri build   # requires Node 18+, Rust (MSVC), WebView2
