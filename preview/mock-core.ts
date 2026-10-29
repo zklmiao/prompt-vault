@@ -140,6 +140,12 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
       return null;
     case "win_is_maximized":
       return false;
+    case "hide_quickpick":
+      console.log("[mock] hide_quickpick");
+      return null;
+    case "open_editor":
+      console.log("[mock] open_editor", args?.id);
+      return null;
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
   }

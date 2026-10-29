@@ -160,6 +160,14 @@ export function IconTag(p: IconProps) {
   );
 }
 
+export function IconCheck(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M20 6 9 17l-5-5" />
+    </Svg>
+  );
+}
+
 export function IconSettings(p: IconProps) {
   return (
     <Svg {...p}>

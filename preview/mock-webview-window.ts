@@ -20,8 +20,15 @@ function installDispatcher() {
 }
 
 export function getCurrentWebviewWindow() {
+  const quickpickPreview = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get("quickpick") === "1";
+    } catch {
+      return false;
+    }
+  })();
   return {
-    label: "main",
+    label: quickpickPreview ? "quickpick" : "main",
     async onDragDropEvent(handler: DropHandler) {
       handlers.add(handler);
       installDispatcher();

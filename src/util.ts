@@ -143,3 +143,142 @@ export function coerceItems(parsed: unknown): PromptItem[] {
   }
   return out;
 }
+
+/* ---------- 模糊搜索(快速拾取与主窗口共用) ---------- */
+
+export interface MatchRange {
+  /** 起始下标(含) */
+  start: number;
+  /** 结束下标(不含) */
+  end: number;
+}
+
+export interface FuzzyMatch {
+  score: number;
+  ranges: MatchRange[];
+}
+
+export interface PromptMatch {
+  score: number;
+  title: FuzzyMatch | null;
+  tags: (FuzzyMatch | null)[];
+  /** 仅当标题/标签未命中而正文命中时生成 */
+  bodySnippet: { text: string; ranges: MatchRange[] } | null;
+}
+
+function mergeRanges(ranges: MatchRange[]): MatchRange[] {
+  if (ranges.length <= 1) return ranges.map((r) => ({ ...r }));
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const out: MatchRange[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = out[out.length - 1];
+    const cur = sorted[i];
+    if (cur.start <= last.end) last.end = Math.max(last.end, cur.end);
+    else out.push({ ...cur });
+  }
+  return out;
+}
+
+const WORD_BOUNDARY_RE = /[\s\-_/.,;:!?()[\]{}"'`#@、,。;:!?()【】《》]/;
+
+function isWordStart(text: string, index: number): boolean {
+  if (index === 0) return true;
+  return WORD_BOUNDARY_RE.test(text[index - 1]);
+}
+
+/**
+ * 子序列模糊匹配:query 的每个字符按顺序出现在 text 中即命中。
+ * 打分:单字符 10 分;连续命中额外 +6×连续长度;词首额外 +8;
+ * 完整子串直接给高分(100 + 4×长度 + 起始位置奖励)。
+ * 中文按字符匹配,不做拼音。
+ */
+export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const t = text.toLowerCase();
+  if (!t) return null;
+
+  const sub = t.indexOf(q);
+  if (sub >= 0) {
+    const score = 100 + q.length * 4 + Math.max(0, 20 - sub);
+    return { score, ranges: [{ start: sub, end: sub + q.length }] };
+  }
+
+  const ranges: MatchRange[] = [];
+  let score = 0;
+  let qi = 0;
+  let lastIndex = -2;
+  let run = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] !== q[qi]) continue;
+    const consecutive = i === lastIndex + 1;
+    run = consecutive ? run + 1 : 0;
+    score += 10 + (consecutive ? 6 * run : 0) + (isWordStart(text, i) ? 8 : 0);
+    ranges.push({ start: i, end: i + 1 });
+    lastIndex = i;
+    qi += 1;
+  }
+  if (qi < q.length) return null;
+
+  const span = (ranges[ranges.length - 1]?.end ?? 0) - (ranges[0]?.start ?? 0);
+  score += Math.max(0, 30 - Math.floor(span / 2));
+  return { score, ranges: mergeRanges(ranges) };
+}
+
+const SNIPPET_LEAD = 24;
+const SNIPPET_TAIL = 40;
+
+function makeSnippet(
+  text: string,
+  ranges: MatchRange[],
+): { text: string; ranges: MatchRange[] } {
+  const first = ranges[0];
+  const last = ranges[ranges.length - 1];
+  const start = Math.max(0, first.start - SNIPPET_LEAD);
+  const end = Math.min(text.length, last.end + SNIPPET_TAIL);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  // 换行逐字符替换为空格,保持下标一一对应
+  const slice = text.slice(start, end).replace(/[\r\n]/g, " ");
+  const mapped: MatchRange[] = [];
+  for (const r of ranges) {
+    const s = Math.max(r.start, start) - start;
+    const e = Math.min(r.end, end) - start;
+    if (e > s) {
+      mapped.push({ start: s + prefix.length, end: e + prefix.length });
+    }
+  }
+  return { text: prefix + slice + suffix, ranges: mergeRanges(mapped) };
+}
+
+const FIELD_WEIGHT = { title: 3, tag: 2, source: 1.5, note: 1, body: 1 } as const;
+
+/** 对单条 prompt 做全字段匹配并加权评分;正文命中且标题/标签未命中时附一行片段 */
+export function matchPrompt(query: string, item: PromptItem): PromptMatch | null {
+  const q = query.trim();
+  if (!q) return null;
+
+  const title = fuzzyMatch(q, item.title);
+  const tags = item.tags.map((t) => fuzzyMatch(q, t));
+  const bestTag = tags.reduce<FuzzyMatch | null>(
+    (best, cur) => (cur && (!best || cur.score > best.score) ? cur : best),
+    null,
+  );
+  const source = fuzzyMatch(q, item.source);
+  const note = fuzzyMatch(q, item.note);
+  const body = fuzzyMatch(q, item.body);
+
+  if (!title && !bestTag && !source && !note && !body) return null;
+
+  let score = 0;
+  if (title) score += title.score * FIELD_WEIGHT.title;
+  if (bestTag) score += bestTag.score * FIELD_WEIGHT.tag;
+  if (source) score += source.score * FIELD_WEIGHT.source;
+  if (note) score += note.score * FIELD_WEIGHT.note;
+  if (body) score += body.score * FIELD_WEIGHT.body;
+
+  const bodySnippet =
+    body && !title && !bestTag ? makeSnippet(item.body, body.ranges) : null;
+
+  return { score, title, tags, bodySnippet };
+}

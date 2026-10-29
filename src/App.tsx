@@ -24,6 +24,7 @@ import {
   fillPlaceholders,
   isComposingEvent,
   isNewer,
+  matchPrompt,
   newId,
   newerIso,
   nowIso,
@@ -314,6 +315,52 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      try {
+        // 快速拾取窗口按 Tab:打开主窗口并进入该条目的编辑态
+        const u4 = await listen<string>("open-editor", (e) => {
+          void (async () => {
+            const p = dataPathRef.current;
+            if (!p) return;
+            const raw = await readDataFile(p);
+            if (raw === null) {
+              showToast("该条目已不存在", "err");
+              return;
+            }
+            let parsed: PromptItem[] = [];
+            try {
+              parsed = coerceItems(JSON.parse(raw));
+            } catch {
+              showToast("数据读取失败", "err");
+              return;
+            }
+            const target = parsed.find(
+              (it) => it.id === e.payload && !it.deletedAt,
+            );
+            if (!target) {
+              showToast("该条目已不存在", "err");
+              return;
+            }
+            setItems(parsed);
+            setTrashOpen(false);
+            setSearch("");
+            setActiveTag(null);
+            setCopyTarget(null);
+            setPurgeTarget(null);
+            setImportCandidate(null);
+            setBatchPurgeOpen(false);
+            setSettingsOpen(false);
+            setSelectedId(target.id);
+            setMode({ kind: "edit", id: target.id });
+          })();
+        });
+        if (disposed) {
+          u4();
+          return;
+        }
+        unlistens.push(u4);
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       disposed = true;
@@ -362,17 +409,23 @@ export default function App() {
 
   const filtered = useMemo(() => {
     if (trashOpen) return trashItems;
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     let list = activeTag
       ? liveItems.filter((it) => it.tags.includes(activeTag))
       : liveItems;
     if (q) {
-      list = list.filter((it) =>
-        [it.title, it.body, it.source, it.note, it.tags.join(" ")]
-          .join("\n")
-          .toLowerCase()
-          .includes(q),
+      const scored: Array<{ item: PromptItem; score: number }> = [];
+      for (const it of list) {
+        const m = matchPrompt(q, it);
+        if (m) scored.push({ item: it, score: m.score });
+      }
+      scored.sort(
+        (a, b) =>
+          b.score - a.score ||
+          Number(b.item.pinned) - Number(a.item.pinned) ||
+          b.item.updatedAt.localeCompare(a.item.updatedAt),
       );
+      return scored.map((s) => s.item);
     }
     return [...list].sort(
       (a, b) =>

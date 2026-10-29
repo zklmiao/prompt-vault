@@ -1107,24 +1107,98 @@ textarea.mono {
   font-family: inherit;
 }
 
-.qp-list {
+.qp-body {
   flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.qp-list {
+  width: 360px;
+  flex-shrink: 0;
   overflow-y: auto;
   padding: 6px;
+  border-right: 1px solid var(--border);
+}
+
+.qp-preview {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qp-prev-title {
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.qp-prev-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.qp-prev-line {
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.qp-prev-body {
+  flex: 1;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  background: var(--body-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: Consolas, "JetBrains Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-y: auto;
+  min-height: 80px;
+}
+
+.qp-prev-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.qp-prev-empty {
+  margin-top: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.qp-section {
+  padding: 8px 12px 3px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
 }
 
 .qp-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
 }
 
 .qp-row.active {
   background: var(--accent-soft);
+}
+
+.qp-line1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .qp-title {
@@ -1142,6 +1216,53 @@ textarea.mono {
   color: var(--muted);
   font-size: 12px;
   flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.qp-snippet {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qp-footer {
+  display: flex;
+  gap: 14px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.qp-confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--panel);
+  color: var(--accent);
+  animation: pv-fade-in 0.12s ease;
+}
+
+.qp-confirm-text {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.qp-confirm-sub {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .qp-empty {
@@ -1155,6 +1276,14 @@ textarea.mono {
   padding: 8px 16px;
   color: var(--danger);
   font-size: 13px;
+}
+
+/* 搜索命中高亮(快速拾取与他人复用) */
+mark.hl {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 /* ============ 批量操作面板 ============ */

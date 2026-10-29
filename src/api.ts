@@ -54,6 +54,10 @@ export const setHotkeys = (
 export const hideQuickpick = (): Promise<void> =>
   invoke("hide_quickpick");
 
+/** 从快速拾取窗口跳到主窗口并进入指定条目的编辑态 */
+export const openEditor = (id: string): Promise<void> =>
+  invoke("open_editor", { id });
+
 // ---- 自绘标题栏的窗口控制 ----
 export const winMinimize = (): Promise<void> => invoke("win_minimize");
 export const winToggleMaximize = (): Promise<void> =>

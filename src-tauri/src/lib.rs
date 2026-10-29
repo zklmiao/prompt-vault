@@ -16,8 +16,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 const DEFAULT_DATA_PATH: &str = r"E:\Agent\Proj\prompt-vault\data\prompts.json";
 const MAIN_LABEL: &str = "main";
 const QUICKPICK_LABEL: &str = "quickpick";
-const QUICKPICK_WIDTH: f64 = 680.0;
-const QUICKPICK_HEIGHT: f64 = 470.0;
+const QUICKPICK_WIDTH: f64 = 900.0;
+const QUICKPICK_HEIGHT: f64 = 480.0;
 const DEFAULT_HOTKEY_QUICKPICK: &str = "alt+q";
 const DEFAULT_HOTKEY_CLIPBOARD: &str = "alt+shift+n";
 
@@ -474,6 +474,13 @@ fn hide_quickpick(app: AppHandle) {
     }
 }
 
+/// 从快速拾取窗口跳到主窗口并进入指定条目的编辑态
+#[tauri::command]
+fn open_editor(app: AppHandle, id: String) {
+    show_main_window(&app);
+    let _ = app.emit_to(MAIN_LABEL, "open-editor", id);
+}
+
 /// 自绘标题栏:最小化主窗口
 #[tauri::command]
 fn win_minimize(app: AppHandle) {
@@ -557,6 +564,7 @@ pub fn run() {
             bump_copy_stats,
             first_run_default,
             hide_quickpick,
+            open_editor,
             win_minimize,
             win_is_maximized,
             win_toggle_maximize,
