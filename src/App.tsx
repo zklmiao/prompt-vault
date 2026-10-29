@@ -1357,6 +1357,7 @@ export default function App() {
             mode={mode}
             allTags={allTags}
             trashOpen={trashOpen}
+            hasItems={trashOpen ? trashItems.length > 0 : liveItems.length > 0}
             onSave={handleSave}
             onCancel={() => setMode({ kind: "view" })}
             onEdit={() => {

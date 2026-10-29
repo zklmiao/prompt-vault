@@ -18,6 +18,8 @@ interface Props {
   mode: Mode;
   allTags: string[];
   trashOpen: boolean;
+  /** 当前视图(主列表 / 回收站)是否存在条目;用于区分"无数据"与"有数据但未选中" */
+  hasItems: boolean;
   onSave: (draft: Draft) => void | Promise<void>;
   onCancel: () => void;
   onEdit: () => void;
@@ -49,6 +51,7 @@ export default function DetailPane({
   mode,
   allTags,
   trashOpen,
+  hasItems,
   onSave,
   onCancel,
   onEdit,
@@ -105,6 +108,20 @@ export default function DetailPane({
         </section>
       );
     }
+    const title = trashOpen
+      ? hasItems
+        ? "在左侧选择一条收藏查看详情"
+        : "回收站是空的"
+      : hasItems
+        ? "在左侧选择一条收藏查看详情"
+        : "还没有收藏";
+    const hint = trashOpen
+      ? hasItems
+        ? "点击左侧条目可查看、恢复或彻底删除。"
+        : "删除的收藏会先放进这里,可随时恢复。"
+      : hasItems
+        ? "Ctrl+F 搜索,或点击左侧列表选择。"
+        : "把好用的 prompt 存进来,随时搜索、一键复制。";
     return (
       <section className="detail">
         <div className="detail-inner empty-state">
@@ -146,14 +163,8 @@ export default function DetailPane({
               fill="var(--star)"
             />
           </svg>
-          <p className="empty-title">
-            {trashOpen ? "回收站是空的" : "还没有收藏"}
-          </p>
-          <p className="muted">
-            {trashOpen
-              ? "删除的收藏会先放进这里,可随时恢复。"
-              : "把好用的 prompt 存进来,随时搜索、一键复制。"}
-          </p>
+          <p className="empty-title">{title}</p>
+          <p className="muted">{hint}</p>
         </div>
       </section>
     );
