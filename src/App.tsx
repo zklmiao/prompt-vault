@@ -199,6 +199,17 @@ export default function App() {
     clipboard_new: "alt+shift+n",
   });
 
+  // 任一弹层打开时,窗口级列表快捷键全部静默
+  const overlayOpen = !!(
+    copyTarget ||
+    purgeTarget ||
+    importCandidate ||
+    batchPurgeOpen ||
+    settingsOpen ||
+    paletteOpen ||
+    cheatsheetOpen
+  );
+
   const dataPathRef = useRef<string | null>(null);
   const bootstrapped = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -486,9 +497,32 @@ export default function App() {
     );
   }, [trashOpen, trashItems, liveItems, search, activeTag, sortMode]);
 
+  // 键盘活动项:仅当 selectedId 仍出现在当前过滤结果中时有效
+  const activeId = useMemo(
+    () => (filtered.some((it) => it.id === selectedId) ? selectedId : null),
+    [filtered, selectedId],
+  );
+
   const selectedItem = selectedId
     ? (items.find((i) => i.id === selectedId) ?? null)
     : null;
+
+  // 活动项滚动跟随(block: nearest 不产生滚动动画)
+  useEffect(() => {
+    if (!activeId) return;
+    document
+      .getElementById(`pv-row-${activeId}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeId]);
+
+  // 离开编辑态后把焦点交还搜索框
+  const prevModeKindRef = useRef(mode.kind);
+  useEffect(() => {
+    if (prevModeKindRef.current === "edit" && mode.kind !== "edit") {
+      searchRef.current?.focus();
+    }
+    prevModeKindRef.current = mode.kind;
+  }, [mode]);
 
   const selectedItems = useMemo(
     () => items.filter((it) => selectedIds.has(it.id)),
@@ -529,6 +563,14 @@ export default function App() {
     setSelectedIds(new Set());
     shiftAnchor.current = null;
   }, []);
+
+  // 行获得键盘焦点时同步活动项(编辑态下不改,避免干扰正在编辑的内容)
+  const handleRowFocus = useCallback(
+    (id: string) => {
+      if (mode.kind === "view") setSelectedId(id);
+    },
+    [mode],
+  );
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -669,16 +711,9 @@ export default function App() {
         !!target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
           target.isContentEditable);
-      const modalOpen = !!(
-        copyTarget ||
-        purgeTarget ||
-        importCandidate ||
-        batchPurgeOpen ||
-        settingsOpen ||
-        paletteOpen ||
-        cheatsheetOpen
-      );
+      const modalOpen = overlayOpen;
       if (e.key === "Escape" && !typing && !modalOpen && selectedIds.size > 0) {
         e.preventDefault();
         clearSelection();
@@ -700,13 +735,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    copyTarget,
-    purgeTarget,
-    importCandidate,
-    batchPurgeOpen,
-    settingsOpen,
-    paletteOpen,
-    cheatsheetOpen,
+    overlayOpen,
     selectedIds.size,
     filtered.length,
     clearSelection,
@@ -959,6 +988,118 @@ export default function App() {
     },
     [showToast],
   );
+
+  // 主列表键盘闭环:↑↓/Home/End 导航,Enter 复制,Ctrl+E 编辑,Space 勾选
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isComposingEvent(e)) return;
+      if (overlayOpen) return;
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      const tag = el.tagName;
+      const inputType = tag === "INPUT" ? (el as HTMLInputElement).type : "";
+      // 原生控件优先:下拉 / 按钮 / 复选框 / 单选
+      if (
+        tag === "SELECT" ||
+        tag === "BUTTON" ||
+        (tag === "INPUT" &&
+          ["checkbox", "radio", "button", "submit", "reset"].includes(inputType))
+      ) {
+        return;
+      }
+      const isSearch = el === searchRef.current;
+      const isTextEntry =
+        tag === "TEXTAREA" ||
+        el.isContentEditable ||
+        (tag === "INPUT" &&
+          !["checkbox", "radio", "button", "submit", "reset"].includes(inputType));
+      // 编辑器等文本输入区:方向键/空格交给文本;Esc 退出编辑并回到搜索框
+      if (isTextEntry && !isSearch) {
+        if (e.key === "Escape" && mode.kind !== "view") {
+          e.preventDefault();
+          setMode({ kind: "view" });
+          searchRef.current?.focus();
+        }
+        return;
+      }
+      if (mode.kind !== "view") return;
+      // 仅在搜索框、列表行内或空白处响应
+      const inList = el.closest("#pv-list") != null;
+      if (!isSearch && !inList && tag !== "BODY" && el.id !== "root") return;
+
+      const activeIdx = activeId
+        ? filtered.findIndex((it) => it.id === activeId)
+        : -1;
+      const move = (to: number) => {
+        if (filtered.length === 0) return;
+        const clamped = Math.max(0, Math.min(filtered.length - 1, to));
+        const next = filtered[clamped];
+        if (!next || next.id === activeId) return;
+        setSelectedId(next.id);
+        // 焦点在列表行内时,把 DOM 焦点同步到新行(roving tabindex)
+        if (!isSearch) {
+          document.getElementById(`pv-row-${next.id}`)?.focus();
+        }
+      };
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          move(activeIdx === -1 ? 0 : activeIdx + 1);
+          return;
+        case "ArrowUp":
+          e.preventDefault();
+          move(activeIdx === -1 ? filtered.length - 1 : activeIdx - 1);
+          return;
+        case "Home":
+          e.preventDefault();
+          move(0);
+          return;
+        case "End":
+          e.preventDefault();
+          move(filtered.length - 1);
+          return;
+        case "Enter": {
+          e.preventDefault();
+          if (activeIdx !== -1) {
+            void handleCopy(filtered[activeIdx]);
+          } else if (filtered.length > 0) {
+            // 无活动项:先选中第一条,不复制(避免复制看不见的内容)
+            setSelectedId(filtered[0].id);
+          }
+          return;
+        }
+        case " ": {
+          if (!inList || !activeId) return;
+          e.preventDefault();
+          toggleSelected(activeId);
+          return;
+        }
+        default:
+          break;
+      }
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.key === "e" || e.key === "E")
+      ) {
+        if (trashOpen || activeIdx === -1) return;
+        e.preventDefault();
+        setMode({ kind: "edit", id: filtered[activeIdx].id });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    overlayOpen,
+    filtered,
+    activeId,
+    mode,
+    trashOpen,
+    handleCopy,
+    toggleSelected,
+  ]);
 
   const handleImportPick = useCallback(async () => {
     const path = await chooseImportFile();
@@ -1276,6 +1417,8 @@ export default function App() {
             placeholder="搜索 标题 / 正文 / 标签 / 备注…(Ctrl+F)"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-controls="pv-list"
+            aria-activedescendant={activeId ? `pv-row-${activeId}` : undefined}
           />
           {activeTag && !trashOpen && (
             <button
@@ -1333,6 +1476,7 @@ export default function App() {
           selectedId={selectedId}
           selectedIds={selectedIds}
           onRowClick={handleRowClick}
+          onRowFocus={handleRowFocus}
           onCheckbox={toggleSelected}
           onTagClick={handleTagClick}
           onQuickCopy={(it) => void handleCopy(it)}

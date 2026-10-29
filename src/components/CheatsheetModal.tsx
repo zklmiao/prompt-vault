@@ -44,6 +44,17 @@ export default function CheatsheetModal({ hotkeys, onClose }: Props) {
       ],
     },
     {
+      title: "主列表",
+      rows: [
+        { keys: ["↑", "↓"], desc: "选择上一条 / 下一条" },
+        { keys: ["Home", "End"], desc: "跳到第一条 / 最后一条" },
+        { keys: ["Enter"], desc: "复制选中项" },
+        { keys: ["Ctrl+E"], desc: "编辑选中项" },
+        { keys: ["Space"], desc: "勾选 / 取消勾选(多选)" },
+        { keys: ["Esc"], desc: "退出编辑 / 清除多选" },
+      ],
+    },
+    {
       title: "编辑与列表",
       rows: [
         { keys: ["Enter"], desc: "标签输入框:确认并添加标签" },

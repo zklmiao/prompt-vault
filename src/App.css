@@ -427,6 +427,11 @@ textarea.mono {
   border-left-color: var(--accent);
 }
 
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .row.checked {
   background: var(--accent-soft);
   border-left-color: var(--accent);

@@ -12,6 +12,7 @@ interface Props {
   selectedId: string | null;
   selectedIds: Set<string>;
   onRowClick: (id: string, e: React.MouseEvent) => void;
+  onRowFocus: (id: string) => void;
   onCheckbox: (id: string) => void;
   onTagClick: (tag: string) => void;
   onQuickCopy: (item: PromptItem) => void;
@@ -26,6 +27,7 @@ export default function Sidebar({
   selectedId,
   selectedIds,
   onRowClick,
+  onRowFocus,
   onCheckbox,
   onTagClick,
   onQuickCopy,
@@ -56,18 +58,36 @@ export default function Sidebar({
           </select>
         )}
       </div>
-      <div className={"list" + (selecting ? " selecting" : "")}>
-        {items.map((it) => {
+      <div
+        className={"list" + (selecting ? " selecting" : "")}
+        role="listbox"
+        aria-multiselectable="true"
+        aria-label={trashOpen ? "回收站列表" : "收藏列表"}
+        id="pv-list"
+      >
+        {items.map((it, index) => {
           const checked = selectedIds.has(it.id);
+          // roving tabindex:整组一个 Tab 停靠点;无选中项时第一行可聚焦
+          const isTabStop = selectedId ? it.id === selectedId : index === 0;
           return (
             <div
               key={it.id}
+              id={`pv-row-${it.id}`}
+              role="option"
+              aria-selected={checked}
+              tabIndex={isTabStop ? 0 : -1}
               className={
                 "row" +
                 (it.id === selectedId ? " active" : "") +
                 (checked ? " checked" : "")
               }
               onClick={(e) => onRowClick(it.id, e)}
+              onFocus={(e) => {
+                // 行内按钮/复选框获得焦点时不改变活动项
+                const t = e.target as HTMLElement;
+                if (t.closest("button") || t.tagName === "INPUT") return;
+                onRowFocus(it.id);
+              }}
             >
               <input
                 type="checkbox"
@@ -75,6 +95,7 @@ export default function Sidebar({
                 checked={checked}
                 onChange={() => onCheckbox(it.id)}
                 onClick={(e) => e.stopPropagation()}
+                tabIndex={-1}
                 aria-label={`选择「${it.title || "未命名"}」`}
               />
               <div className="row-title">
