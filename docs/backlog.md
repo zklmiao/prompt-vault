@@ -41,10 +41,14 @@
 #### S2 ❌ Windows 11 Mica / Acrylic 窗口材质(2026-10-29 决定不做)
 **决定**:用户明确不做,不再排期。原方案仅作追溯:接入 `window-vibrancy`(Win11 `apply_mica` / Win10 `apply_acrylic`),标题栏与侧栏半透明、内容区保持实底。若将来重新考虑,先评估 WebView2 文字渲染与滚动性能。
 
-#### S3 应用内命令面板 `Ctrl+K` + 快捷键速查表 `?`(成本 S–M,专业感强)
-- `Ctrl+K`:命令面板(新建 / 剪贴板新建 / 导入 / 导出 / 回收站 / 切换主题 / 排序 / 打开设置),模糊搜索 + 分组,复用 QuickPick 的交互与样式;
-- `?`:快捷键速查表弹窗(分组 kbd 键帽:全局 / 窗口 / 编辑)。
-**验收**:所有命令可用;不与输入框、热键捕获冲突;Esc 关闭。
+#### S3 ✅ 应用内命令面板 `Ctrl+K` + 快捷键速查表 `?`(已完成 `62a6a51`)
+**已完成**:
+- `src/components/CommandPalette.tsx`:640px 居中面板,复用 qp-* 视觉;分组(收藏 / 视图 / 应用)共 11 条命令,支持子序列模糊过滤(标签权重×3、关键词×2)与命中高亮;↑↓ 跨分组循环、Enter 执行、Esc(窗口级,焦点无关)关闭、点遮罩关闭;执行命令先关闭面板;排序项显示当前勾选;全局热键与「快速拾取」热键动态读取配置展示。
+- `src/components/CheatsheetModal.tsx`:`?` 打开,复用 Modal(focus trap + Esc);全局 / 窗口 / 编辑与列表三组 kbd 键帽;全局热键动态读取 `getHotkeys`(预览环境回退默认值)。
+- `src/App.tsx`:主题状态提升到 App(ThemeToggle 改为受控);新增 paletteOpen / cheatsheetOpen 并纳入 modalOpen 与 Ctrl+N/F 守卫;Ctrl+K / `?` 新增窗口级监听(IME 组字守卫);设置关闭后重新加载热键;命令动作复用现有回调(startNew / newFromClipboard / handleImportPick / handleExport / toggleTrash / setSortMode / setSettingsOpen / toggleTheme)。
+- `src/util.ts` 新增 `formatHotkey`,设置弹窗改用同一格式化函数,三处展示一致。
+**验证**:`tsc` 零错误;构建 + 冒烟通过;预览页断言:Ctrl+K 打开(11 条 / 3 组)、「排序」过滤 3 条并高亮、↓ + Enter 切换排序(recent)、主题命令切换成功、速查表命令与 `?` 均能打开/关闭、面板内 Ctrl+K 关闭、面板打开时 Ctrl+N / Ctrl+A 不生效、设置打开时 Ctrl+K / `?` 不响应;暗色视觉核对通过。
+**修正**:测试发现面板 Esc 原只绑在输入框,已补窗口级监听(焦点离开输入框仍可关闭)。
 
 #### S4 占位符弹窗实时预览 + Tab 跳转(成本 S,消除不确定性)
 **现状**:只有输入框;`lastValues` 预填已有。
@@ -85,10 +89,10 @@
 1. **第一批(约半天)**:P0-1 IME + P0-2 重截图 + A2 / A3 / A6;
 2. **第二批(2–3 天)**:S1 QuickPick 2.0 + A1(共用匹配器);
 3. **第三批(1–2 天)**:S4 + A4 / A5 / A7;
-4. **第四批(约 1 天)**:S3 命令面板 + 速查表;
+4. ~~第四批:S3 命令面板 + 速查表~~ —— 已完成(`62a6a51`);
 5. ~~第五批:S2 Mica~~ —— 2026-10-29 决定不做。
 
-已完成:P0-1、P0-2、S1(见上文勾选)。
+已完成:P0-1、P0-2、S1、S3(见上文勾选)。
 
 ---
 
