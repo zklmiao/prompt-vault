@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Prompt Vault",
-  "version": "0.1.9",
+  "version": "0.1.9-alpha.2",
   "identifier": "com.zklmiao.prompt-vault",
   "build": {
     "beforeDevCommand": "npm run dev",

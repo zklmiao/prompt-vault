@@ -13,7 +13,7 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 <img src="docs/screenshots/detail-dark.png" width="86%" alt="Prompt Vault 主界面" />
 
-<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.2--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
 
 </div>
 
@@ -105,13 +105,13 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 | 文件 | 说明 |
 |---|---|
-| `PromptVault-0.1.0-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
-| `PromptVault-0.1.0-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
+| `PromptVault-0.1.9.2-alpha-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
+| `PromptVault-0.1.9.2-alpha-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
 
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
 
-> 当前源码版本为 **0.1.9**；Releases 中最新正式发布仍是 v0.1.0。v0.1.9 发布后，上表文件名会同步为 `PromptVault-0.1.9-*`。
+> 当前源码版本为 **0.1.9.2-alpha**（清单内为合法 semver `0.1.9-alpha.2`），为预发布（pre-release）。
 
 ### 方式二：从源码构建
 
@@ -244,7 +244,7 @@ npx vite --config preview/vite.preview.config.ts
 - [x] 命令面板（`Ctrl+K`）与快捷键速查表（`?`）
 - [x] 首次启动引导 / 详情级联淡入 / 中文输入法组字保护
 - [ ] 占位符实时预览、搜索命中片段、右键菜单、标签配色（详见 [docs/backlog.md](docs/backlog.md)）
-- [ ] 发布 v0.1.9 Release（代码与构建已就绪，README 下载表待同步）
+- [x] 发布 v0.1.9 系列预发布（v0.1.9-alpha → v0.1.9.2-alpha，附回归测试报告；正式 Release 待定）
 - [ ] 数据量过千后评估 SQLite + FTS5
 
 ---
