@@ -35,11 +35,13 @@ export type Theme = "light" | "dark";
 /** 列表排序:最近更新 / 最近复制 / 最常复制(置顶始终在最前) */
 export type SortMode = "updated" | "recent" | "most";
 
-/** 带内容进入新建编辑态时的预填(剪贴板 / 拖入文件) */
+/** 带内容进入新建编辑态时的预填(剪贴板 / 拖入文件 / 首次引导示例) */
 export interface NewPrefill {
   title?: string;
   body?: string;
   source?: string;
+  tags?: string[];
+  note?: string;
 }
 
 export interface Draft {

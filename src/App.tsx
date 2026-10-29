@@ -172,6 +172,13 @@ export default function App() {
   const [batchPurgeOpen, setBatchPurgeOpen] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboarded, setOnboarded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("pv-onboarded") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [sortMode, setSortModeState] = useState<SortMode>(() => {
     try {
       const saved = localStorage.getItem("pv-sort");
@@ -200,6 +207,15 @@ export default function App() {
   const showToast = useCallback((text: string, kind: "ok" | "err" = "ok") => {
     setToast({ text, kind });
     window.setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const markOnboarded = useCallback(() => {
+    setOnboarded(true);
+    try {
+      localStorage.setItem("pv-onboarded", "1");
+    } catch {
+      /* localStorage 不可用:仅本次运行生效 */
+    }
   }, []);
 
   const setSortMode = useCallback((mode: SortMode) => {
@@ -485,6 +501,18 @@ export default function App() {
     setMode({ kind: "new" });
   }, []);
 
+  /** 引导第 2 步:带示例内容的预填 */
+  const handleCreateSample = useCallback(() => {
+    setPrefill({
+      title: "示例:代码审查助手",
+      body: "请审查以下代码变更:{{diff}}\n\n重点关注:{{关注点}}\n\n输出:问题清单、改进建议、是否可合并。",
+      source: "引导示例",
+      tags: ["示例"],
+    });
+    setPrefillSeq((s) => s + 1);
+    setMode({ kind: "new" });
+  }, []);
+
   const newFromClipboard = useCallback(async () => {
     let text: string | null = null;
     try {
@@ -753,6 +781,8 @@ export default function App() {
         setSelectedId(item.id);
         setMode({ kind: "view" });
         showToast("已保存");
+        // 任意新建成功即视为已完成引导,避免删光后反复出现
+        markOnboarded();
       } else if (mode.kind === "edit") {
         const next = items.map((it) =>
           it.id === mode.id ? { ...it, ...draft, updatedAt: now } : it,
@@ -762,7 +792,7 @@ export default function App() {
         showToast("已保存");
       }
     },
-    [mode, items, persist, showToast],
+    [mode, items, persist, showToast, markOnboarded],
   );
 
   // 软删除:进回收站,可恢复
@@ -1340,6 +1370,15 @@ export default function App() {
             onPurge={(it) => setPurgeTarget(it)}
             prefill={prefill}
             prefillSeq={prefillSeq}
+            onboarding={
+              !trashOpen && !onboarded && liveItems.length === 0
+                ? {
+                    onSkip: markOnboarded,
+                    onCreateFirst: startNew,
+                    onCreateSample: handleCreateSample,
+                  }
+                : null
+            }
           />
         )}
       </div>

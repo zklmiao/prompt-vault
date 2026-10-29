@@ -100,7 +100,14 @@ const seed: DataFile = {
   ],
 };
 
-let current = JSON.stringify(seed, null, 2);
+// 预览夹具支持 ?empty=1:以空收藏启动,用于验证首次引导
+const emptyMode =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("empty") === "1";
+
+const initial: DataFile = emptyMode ? { version: 1, prompts: [] } : seed;
+
+let current = JSON.stringify(initial, null, 2);
 
 export async function invoke(cmd: string, args?: Record<string, unknown>) {
   switch (cmd) {

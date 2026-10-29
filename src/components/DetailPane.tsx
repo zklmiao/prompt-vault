@@ -4,6 +4,7 @@ import { extractPlaceholders, formatDate, isComposingEvent } from "../util";
 import TagInput from "./TagInput";
 import TagChips from "./TagChips";
 import BodyText from "./BodyText";
+import Onboarding, { type OnboardingProps } from "./Onboarding";
 import {
   IconCopy,
   IconEdit,
@@ -28,15 +29,17 @@ interface Props {
   onPurge: (item: PromptItem) => void;
   prefill: NewPrefill | null;
   prefillSeq: number;
+  /** 首次启动引导;仅空态且未跳过时传入 */
+  onboarding: OnboardingProps | null;
 }
 
 function draftFrom(item: PromptItem | null, prefill: NewPrefill | null): Draft {
   return {
     title: item?.title ?? prefill?.title ?? "",
     body: item?.body ?? prefill?.body ?? "",
-    tags: item?.tags ?? [],
+    tags: item?.tags ?? prefill?.tags ?? [],
     source: item?.source ?? prefill?.source ?? "",
-    note: item?.note ?? "",
+    note: item?.note ?? prefill?.note ?? "",
     pinned: item?.pinned ?? false,
   };
 }
@@ -57,13 +60,16 @@ export default function DetailPane({
   onPurge,
   prefill,
   prefillSeq,
+  onboarding,
 }: Props) {
   if (mode.kind === "new") {
     const heading = !prefill
       ? "新建 Prompt"
       : prefill.source?.startsWith("拖入:")
         ? "从拖入文件新建"
-        : "从剪贴板新建";
+        : prefill.source === "引导示例"
+          ? "创建示例 Prompt"
+          : "从剪贴板新建";
     return (
       <Editor
         key={`new-${prefillSeq}`}
@@ -90,6 +96,15 @@ export default function DetailPane({
   }
 
   if (!item) {
+    if (onboarding) {
+      return (
+        <section className="detail">
+          <div className="detail-inner">
+            <Onboarding {...onboarding} />
+          </div>
+        </section>
+      );
+    }
     return (
       <section className="detail">
         <div className="detail-inner empty-state">
