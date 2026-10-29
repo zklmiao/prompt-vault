@@ -5,6 +5,7 @@
   "windows": ["main", "quickpick"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "dialog:default",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text"
