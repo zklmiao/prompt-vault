@@ -4,7 +4,7 @@
 
 # Prompt Vault
 
-**本地优先的 Prompt 收藏工具 — 收集、检索、填空、一键复制**
+**本地优先的 Prompt 提示词 收藏工具 — 收集、检索、填空、一键复制**
 
 <sub>Collect · Search · Fill · Copy — a local-first prompt vault for Windows.<br/>
 No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub>
