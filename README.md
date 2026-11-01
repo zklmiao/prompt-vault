@@ -101,17 +101,20 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 ### 方式一：下载即用（推荐）
 
-到 [**Releases**](../../releases) 下载任一版本：
+到 [**Releases**](../../releases) 下载最新版本（预发布版本在 Pre-release 区域）：
+
+> **推荐体验 `v0.1.9.2-alpha`**：包含全部最新特性。发布前已通过**全量程序化测试**（TypeScript 类型检查、构建、回归脚本与测试报告），仅缺少**人工回归测验**；欢迎试用并反馈问题。
 
 | 文件 | 说明 |
 |---|---|
 | `PromptVault-0.1.9.2-alpha-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
 | `PromptVault-0.1.9.2-alpha-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
+| `PromptVault-0.1.9.2-alpha-regression-report.md` | 该版本的全量程序化测试报告 |
 
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
 
-> 当前源码版本为 **0.1.9.2-alpha**（清单内为合法 semver `0.1.9-alpha.2`），为预发布（pre-release）。
+> 当前源码版本为 **0.1.9.2-alpha**（清单内为合法 semver `0.1.9-alpha.2`），为预发布（pre-release）；稳定版仍为 `v0.1.0`。
 
 ### 方式二：从源码构建
 
@@ -234,6 +237,18 @@ npx vite --config preview/vite.preview.config.ts
 
 ---
 
+## 🧭 guide/prompts：设计与开发档案
+
+[`guide/prompts`](https://github.com/zklmiao/prompt-vault/tree/guide/prompts) 分支记录了 Prompt Vault 从需求访谈、任务拆解、实现、评审到发布的完整过程。它面向 **vibe coding 开发者**：把“一个想法如何被拆成可执行任务、再由 agent 交付”的全过程摊开，方便交流、复用与复盘。
+
+- [`docs/prompts-archive.md`](https://github.com/zklmiao/prompt-vault/blob/guide/prompts/docs/prompts-archive.md)——65 条用户消息的完整台账、18 个会话索引与统计，以及十份长任务书的全文索引。
+- [`docs/task-books/`](https://github.com/zklmiao/prompt-vault/tree/guide/prompts/docs/task-books)——十份正式任务书全文（背景、精确落点、边界、验收标准、交付要求）。
+- 已脱敏：绝对路径与会话 ID 替换为占位符/编号；原始值不随文档分发。
+
+**也适合作为 vibe coding 入门项目**：规模小、产出价值适中，覆盖“需求 → 任务书 → 实现 → 测试 → 发布”的完整闭环。新手可以照着任务书重走一遍，也可以直接在这些文档上继续迭代。
+
+---
+
 ## 🗺 路线图
 
 - [x] 托盘常驻 + 全局快速拾取（`Alt+Q`，双栏预览与模糊搜索）
@@ -267,6 +282,7 @@ npx vite --config preview/vite.preview.config.ts
 - **Fill** `{{variables}}` in a modal before copying — values are remembered for next time
 - **Copy** from a global quick-pick palette (`Alt+Q`): two-pane preview, recent/most-used sections, `↑↓`, `Enter` — done
 - **Command everything** with `Ctrl+K`; press `?` for the shortcut cheatsheet
+- **Learn by example**: the [`guide/prompts`](https://github.com/zklmiao/prompt-vault/tree/guide/prompts) branch archives the full design/development trail — task books, prompt log and reviews — a beginner-friendly vibe-coding walkthrough
 - **Organize** with pins, tags, batch actions, a trash bin, and usage stats (copy count / recency sorting)
 - **Get started fast**: a 3-step first-run guide (collect · variables · hotkey) that can be skipped
 - **Stay safe**: single JSON file, atomic writes, automatic `.bak` backups, one-click recovery
