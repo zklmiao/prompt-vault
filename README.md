@@ -19,14 +19,6 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 ---
 
-## 🔗 友情推荐：⚡Hotline
-
-> **[⚡Hotline](https://github.com/SC-10749/Hotline)** 一个专注把 **Skill、MCP 与 Agent 工作流**从热点实验做成开箱即用的能力，并覆盖智能问答、文件检索、PPT 生成、深度研究与技能中心等场景。
->
-> Prompt Vault 负责把好用的 Prompt **收好、找快、随时调用**；Hotline 继续探索如何把 Prompt、Skill 和 MCP **组装成可运行的智能体能力**。一个沉淀素材，一个验证与交付能力，正好互补。欢迎前往 GitHub 关注并支持朋友的项目🌟。
-
----
-
 ## ✨ 为什么是 Prompt Vault
 
 平时攒下的 prompt 散落在笔记、聊天记录和收藏夹里，要用时翻半天。
@@ -285,6 +277,12 @@ npx vite --config preview/vite.preview.config.ts
 - [ ] 占位符实时预览、搜索命中片段、右键菜单、标签配色（详见 [docs/backlog.md](docs/backlog.md)）
 - [x] 发布 v0.1.9 系列预发布（v0.1.9-alpha → v0.1.9.2-alpha，附回归测试报告；正式 Release 待定）
 - [ ] 数据量过千后评估 SQLite + FTS5
+
+---
+
+## 🔗 友情链接
+
+<a href="https://github.com/SC-10749"><img src="https://avatars.githubusercontent.com/u/132676042?v=4&amp;s=40" width="20" height="20" alt="SC-10749" title="SC-10749" align="texttop" /></a> <a href="https://github.com/SC-10749/Hotline"><strong>⚡ Hotline</strong></a> <span>前沿技术可用性实验室｜Skill / MCP / Agent｜Prompt Vault 沉淀 Prompt，Hotline 交付能力</span>
 
 ---
 
