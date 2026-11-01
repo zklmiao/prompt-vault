@@ -202,6 +202,8 @@ prompt-vault/
 ├─ preview/                    # 浏览器预览夹具(?quickpick=1 / ?empty=1)
 ├─ docs/
 │  ├─ backlog.md               # 待办与路线图
+│  ├─ prompts-archive.md       # 用户 prompt 与任务书存档(已脱敏)
+│  ├─ task-books/              # 十份长任务书全文
 │  └─ screenshots/
 └─ AGENTS.md                   # 协作约定(给维护者 / agents)
 ```
@@ -231,6 +233,16 @@ npx vite --config preview/vite.preview.config.ts
 - `preview/` 是开发预览夹具，不参与正式构建(tsconfig 只含 `src`)，默认端口 **4173**
   - `?quickpick=1` 单独预览快速拾取窗口；`?empty=1` 以空数据启动（验证首次引导）
 - 待办与路线图见 [`docs/backlog.md`](docs/backlog.md)；协作约定见 [`AGENTS.md`](AGENTS.md)
+
+---
+
+## 📚 Prompt 与任务书存档
+
+`guide/prompts` 分支保留了本项目推进过程中的指令档案，**绝对路径与会话 ID 已脱敏**：
+
+- [`docs/prompts-archive.md`](docs/prompts-archive.md)——65 条用户消息的完整台账、18 个会话索引与统计，以及十份长任务书的全文索引。
+- [`docs/task-books/`](docs/task-books/)——十份正式任务书全文：B4 拖拽导入、B8a 批量操作、B8b 使用统计、全局热键可配置、自绘标题栏、S1 QuickPick 2.0、S3 命令面板、A4 级联淡入、A7 首次启动引导、主窗口键盘闭环。
+- 脱敏规则：绝对路径替换为 `<项目根目录>`、`<用户配置目录>` 等占位符，会话 ID 替换为 `S01`–`S18` 编号；原始值不随文档分发。
 
 ---
 
