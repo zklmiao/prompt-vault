@@ -13,7 +13,7 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 <img src="docs/screenshots/detail-dark.png" width="86%" alt="Prompt Vault 主界面" />
 
-<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.2--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.2--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
 
 </div>
 
@@ -243,6 +243,20 @@ npx vite --config preview/vite.preview.config.ts
 - [`docs/prompts-archive.md`](docs/prompts-archive.md)——65 条用户消息的完整台账、18 个会话索引与统计，以及十份长任务书的全文索引。
 - [`docs/task-books/`](docs/task-books/)——十份正式任务书全文：B4 拖拽导入、B8a 批量操作、B8b 使用统计、全局热键可配置、自绘标题栏、S1 QuickPick 2.0、S3 命令面板、A4 级联淡入、A7 首次启动引导、主窗口键盘闭环。
 - 脱敏规则：绝对路径替换为 `<项目根目录>`、`<用户配置目录>` 等占位符，会话 ID 替换为 `S01`–`S18` 编号；原始值不随文档分发。
+
+---
+
+## 🧑‍💻 Vibe Coding 开发环境
+
+这个项目是典型的小规模 vibe coding 实践：需求由对话逐步收敛，Agent 负责拆解、实现、测试与交付。开发过程中使用到的模型：
+
+| 模型 | 在本项目中的典型分工 |
+|---|---|
+| **GLM 5.3** | 主控 Agent：需求梳理、任务书编写与 review |
+| **GLM 5.3 Flash** | 快速迭代：小步修改、文档与配置调整 |
+| **DeepSeek 4.1 Flash** | 任务执行：按任务书实现、测试与交付 |
+
+> 模型分工随会话阶段变化，以上为典型用法；完整过程见上方的 Prompt 与任务书存档。
 
 ---
 
