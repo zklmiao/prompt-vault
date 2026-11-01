@@ -2792,7 +2792,7 @@ dependencies = [
 
 [[package]]
 name = "prompt-vault"
-version = "0.1.9"
+version = "0.1.9-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
