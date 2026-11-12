@@ -1,6 +1,6 @@
 # Prompt Vault 待办与路线图
 
-> 最后更新:2026-10-28。
+> 最后更新:2026-11-12(插件系统立项,P3)。
 > 维护约定:所有未完成的计划都写在这里,不要只留在聊天记录里;完成后把 `[ ]` 改为 `[x]`,并注明提交号或版本。
 > 状态基线:v0.1.0 已发布(GitHub Release 双资产),此后新增功能均已提交:拖拽导入与批量操作(`66cf56a`)、使用统计与可配置热键(`5957037`)、自绘标题栏(`29dea01`)、QuickPick 2.0(`430fbd5`)、命令面板与速查表(`62a6a51`);当前版本 **0.1.9.2-alpha**(清单 `0.1.9-alpha.2`;v0.1.9-alpha 已发布,v0.1.9.2-alpha 附首轮全量回归报告,README 下载表已同步)。
 
@@ -83,6 +83,28 @@
 - [x] **发布 v0.1.9 系列预发布**(`1b1fffd` 升版本并构建;v0.1.9-alpha 于 2026-10-29 上传,v0.1.9.2-alpha 附回归报告、README 下载资产名已同步 `PromptVault-0.1.9.2-alpha-*`);
 - [ ] 自动更新:设计上不做(更新 = 重新构建发布);
 - [ ] NSIS 构建依赖 GitHub 下载(本机已缓存;换机需镜像/代理,失败重试同命令)。
+
+---
+
+## P3 · 插件系统(feat/plugin-system 分支,2026-11-12 立项)
+
+> 设计定稿:`docs/plugin-system-design.md`(决策总账 D1–D11 + 端点调研事实,**开工前必读**)。
+> v1 插件清单:i18n 语言包、Token 用量圆球(GLM/火山方舟/OpenCode)、MCP Server;剪贴板插件已取消(用系统 Win+V)。
+> 并行开发(2026-11-12):批次 4 Rust 侧在 worktree 分支 `feat/plugin-mcp`、批次 3 Rust 侧在 `feat/plugin-net` 独立推进;主线(本分支)承担批次 1、2 与全部前端/集成/收尾,完成后依次合并两个 worktree 分支。
+
+### v1 实施批次
+
+- [ ] **批次 1 · 宿主与管线**:plugins.json 与存储布局 / manifest 解析 / 权限模型与安装确认弹窗 / script 注入热加载 + webview reload 卸载 / 插件区 UI(已安装·源管理·市场)/ 四平台源协议(github/gitee/gitlab/gitea)/ 下载→sha256→zip-slip 防护解压安装管线;Rust 新增 zip·sha2·hmac·ureq·keyring·notify 依赖与新命令
+- [ ] **批次 2 · i18n**:核心 t() 运行时 + 全量抽 key(20 个组件)/ zh-CN 内置 fallback / en 语言包(type:i18n 数据插件)+ `locales\` 手动目录 / 跟随系统 locale + 设置覆盖 / 即时切换不 reload
+- [ ] **批次 3 · Token 圆球**:Rust 网络代理(SSRF 防护 + raw/bearer/volcengine HMAC 三认证模式)/ 凭据管理器流(Key 明文不出 Rust)/ 圆球悬浮窗(84px、单家显示、左键轮换切换、位置记忆)+ 主窗口详情面板(5h/周/24h 聚合/MCP 月度)/ GLM → 火山方舟 → OpenCode 逐家接入
+- [ ] **批次 4 · MCP Server**:`--mcp` headless(stdio JSON-RPC,跳过 GUI/单实例)/ tools(search_prompts·get_prompt·list_tags·save_prompt 只增)+ 原生 prompts({{变量}}→MCP 参数)/ 数据文件命名全局互斥 + notify watcher(编辑态跳过刷新)/ 产品面板(默认关、风险明示、四客户端一键配置)
+- [ ] **批次 5 · 收尾**:`npx tsc --noEmit` + `cargo test` + `npm run tauri build` + 刷 releases 冒烟 / README(功能表、隐私章节改「核心离线,插件按需联网」、快捷键)+ AGENTS.md 定位段同步改写(单 JSON·不联网 → 增 plugins.json·插件按需联网)/ 本 backlog 与设计文档勾选回写
+
+### v2(已定,不承诺时间)
+
+- [ ] Claude(本地 `~/.claude/projects/**.jsonl` 统计 5h 窗口)、Codex(只读 `~/.codex/auth.json` OAuth + backend API)
+- [ ] 百炼、KiloPass(社区逆向端点,卡片标注「非官方接口,可能失效」)
+- [ ] 每供应商多账号 / MCP 标签过滤暴露 / 语言包扩展 / 第三方源签名评估
 
 ---
 
