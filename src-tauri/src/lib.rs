@@ -12,6 +12,7 @@ use tauri::{
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+mod data_lock;
 mod fuzzy;
 
 /// 首次启动时建议的数据文件位置(按共识默认指向工程内 data 目录)
@@ -360,22 +361,26 @@ fn now_iso_utc() -> String {
     iso_from_epoch_secs(secs)
 }
 
-/// 原子写入实现:目录 → .bak 备份 → 临时文件 sync → 原地替换
+/// 原子写入实现:目录 → .bak 备份 → 临时文件 sync → 原地替换。
+/// 全程持跨进程命名互斥(键 = 数据路径哈希),与 MCP headless 的 save_prompt
+/// 串行化;同线程重入(save_prompt 外层已持锁)由 Win32 互斥体递归计数保证安全。
 fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
-    let p = PathBuf::from(path);
-    if let Some(parent) = p.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    if p.exists() {
-        fs::copy(&p, format!("{}.bak", p.display())).map_err(|e| e.to_string())?;
-    }
-    let tmp = PathBuf::from(format!("{}.tmp", p.display()));
-    {
-        let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
-        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
-        f.sync_all().map_err(|e| e.to_string())?;
-    }
-    replace_file(&tmp, &p).map_err(|e| e.to_string())
+    data_lock::with_data_lock(path, || {
+        let p = PathBuf::from(path);
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if p.exists() {
+            fs::copy(&p, format!("{}.bak", p.display())).map_err(|e| e.to_string())?;
+        }
+        let tmp = PathBuf::from(format!("{}.tmp", p.display()));
+        {
+            let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
+        replace_file(&tmp, &p).map_err(|e| e.to_string())
+    })?
 }
 
 /// 先把旧文件留作 .bak,写临时文件并 sync 落盘,再原子替换,
@@ -419,14 +424,17 @@ fn bump_prompt_stats_in_json(raw: &str, id: &str, copied_at: &str) -> Result<Str
 
 /// 复制统计:copyCount+1、lastCopiedAt=now,原子写回后通知主窗口刷新。
 /// 任何失败都返回 Err,由前端静默忽略(复制本身已经成功)。
+/// 读写全程持跨进程命名互斥,避免与 MCP headless 的 save_prompt 交错写盘。
 #[tauri::command]
 fn bump_copy_stats(app: AppHandle, path: String, id: String) -> Result<(), String> {
     let _guard = STATS_WRITE_LOCK
         .lock()
         .map_err(|_| "统计写入锁不可用".to_string())?;
-    let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let contents = bump_prompt_stats_in_json(&raw, &id, &now_iso_utc())?;
-    write_atomic(Path::new(&path), &contents)?;
+    data_lock::with_data_lock(Path::new(&path), || {
+        let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let contents = bump_prompt_stats_in_json(&raw, &id, &now_iso_utc())?;
+        write_atomic(Path::new(&path), &contents)
+    })??;
     let _ = app.emit_to(MAIN_LABEL, "stats-changed", ());
     Ok(())
 }
