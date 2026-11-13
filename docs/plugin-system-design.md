@@ -271,6 +271,10 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
 3. **安装完整性**:HTTPS + 清单 sha256 + zip-slip 防护 + `minAppVersion` 门控;v1 无签名(D11),开放第三方源前再评估;
 4. **权限 UX**:安装时弹窗逐条确认;运行期越权调用(如未声明 host)由 Rust 直接拒绝并报错;
 5. **失败隔离**:插件加载/运行错误不拖垮宿主;`--mcp` 未启用即拒启。
+6. **命令调用者校验**(批次 4 P0):所有 `plugin_*` 命令(含 `app_exe_path`)在 Rust 命令层注入调用者窗口(`window: tauri::WebviewWindow`,前端 invoke 参数零改动),按两级分级校验,由 `ensure_caller_main` / `ensure_caller_self_or_main` 两个纯函数实现:
+   - **main-only**(插件窗口整体挡在门外):`plugin_read_state` / `plugin_write_state` / `plugin_credential_set` / `plugin_credential_delete` / `plugin_fetch_source` / `plugin_install` / `plugin_uninstall` / `app_exe_path`;
+   - **self-or-main**(主窗口或「参数 plugin_id 与窗口 label 逐字匹配」的本插件窗口):`plugin_open_window` / `plugin_close_window` / `plugin_resize_window` / `plugin_start_drag` / `plugin_show_main_panel` / `plugin_kv_get` / `plugin_kv_set` / `plugin_net_fetch` / `plugin_read_entry` / `plugin_installed_manifest`;`plugin_credential_configured` 参数为 scope 而无 plugin_id,其 self 判定退化为「调用者 label 剥前缀得自身 id」,即任意插件窗口可查存在性布尔(不含秘密值;scope 归属由前端桥 fail-closed 限定自身 manifest);
+   - **两维威胁模型(如实表述)**:本机制阻断的是**跨窗口冒充**维度——插件窗口冒充其他插件(读他家包文件/以他家身份取数/操作他家窗口)或冒充主窗(改状态/装卸插件/写凭据)均被拒绝;而**主窗 webview 内的插件**绕过 pv 桥直调 invoke 时 `window.label()` 恒为 `"main"`,命令层无法区分宿主与插件——这是 D1 可信插件模型的**已接受结构性边界**,本机制不做超出实际的防护宣称。真正的纵深执法点仍是:net_fetch 的服务端 host 白名单(§1)+ 本条的跨窗口校验;前端桥的权限门控为便利层,非安全边界。核心数据命令(`read_data` / `write_data` / `bump_copy_stats` / 热键 / 窗口控制)保持开放:QuickPick 与主窗都在调用,不在本机制范围。
 
 ---
 
