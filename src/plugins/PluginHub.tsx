@@ -2,7 +2,7 @@
 // 全部中文文案;样式走 App.css 的 CSS token;图标用 icons.tsx 内联 SVG。
 // 弹层(Modal/ConfirmModal)沿用既有组件与守卫模式。
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConfirmModal from "../components/ConfirmModal";
 import Modal from "../components/Modal";
 import {
@@ -22,7 +22,7 @@ import {
 } from "./api";
 import { injectAfterEnable, loadPluginsState, savePluginsState } from "./host";
 import type { HostHooks } from "./host";
-import { getWindowSetup } from "./registry";
+import { getPanel, getWindowSetup, registeredPanels } from "./registry";
 import { isNewerVersion } from "./semver";
 import type {
   ChannelRef,
@@ -35,7 +35,7 @@ import type {
   SourceManifest,
 } from "./types";
 
-type Section = "installed" | "sources" | "market";
+type Section = "installed" | "sources" | "market" | `panel:${string}`;
 type Channel = "release" | "beta";
 
 const CHANNEL_LABELS: Record<Channel, string> = {
@@ -102,6 +102,8 @@ export default function PluginHub({
   const [marketError, setMarketError] = useState<string | null>(null);
   const [marketLoading, setMarketLoading] = useState(false);
   const [section, setSection] = useState<Section>("installed");
+  /** 注入完成后(宿主重渲染)读取已注册面板,生成插件面板页签 */
+  const panels = registeredPanels();
   const [uninstallTarget, setUninstallTarget] = useState<string | null>(null);
   const [installCandidate, setInstallCandidate] = useState<{
     entry: MarketEntry;
@@ -546,12 +548,24 @@ export default function PluginHub({
           >
             <IconMarket size={14} /> 市场
           </button>
+          {panels.map(({ pluginId, def }) => (
+            <button
+              key={pluginId}
+              className={"ph-seg" + (section === `panel:${pluginId}` ? " active" : "")}
+              onClick={() => setSection(`panel:${pluginId}`)}
+            >
+              {def.title}
+            </button>
+          ))}
         </div>
       </div>
       <div className="ph-body">
         {section === "installed" ? renderInstalled() : null}
         {section === "sources" ? renderSources() : null}
         {section === "market" ? renderMarket() : null}
+        {section.startsWith("panel:") ? (
+          <PanelHost pluginId={section.slice("panel:".length)} />
+        ) : null}
       </div>
 
       {installCandidate ? (
@@ -661,4 +675,17 @@ function MarketRow({
       </div>
     </div>
   );
+}
+
+/* ---------- 插件面板宿主(ui:"panel" 插件的渲染容器) ---------- */
+
+function PanelHost({ pluginId }: { pluginId: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const def = getPanel(pluginId);
+    if (def && ref.current) {
+      def.render(ref.current);
+    }
+  }, [pluginId]);
+  return <div className="ph-panel-host" ref={ref} />;
 }
