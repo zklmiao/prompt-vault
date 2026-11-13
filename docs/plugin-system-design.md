@@ -12,7 +12,7 @@
 |---|---|---|
 | D1 | 信任模型 | **可信插件 + 声明式权限清单**,运行于主 WebView,仅可调用受控 API 桥(pv.*) |
 | D2 | 技术边界 | **Rust 能力全部内置休眠,插件 = 前端 JS + 数据文件**;第三方插件作者不能写 Rust(Tauri 官方明确运行时动态加载 Rust 插件 out of scope) |
-| D3 | 生命周期 | 装/启 → **即时生效**(经典 script 注入 + asset 协议);停/卸/更 → 状态落盘后 **webview reload(约 1s,进程不重启,数据无损)** |
+| D3 | 生命周期 | 装/启 → **即时生效**(pv-1 内联 script 注入);停/卸/更 → 状态落盘后 **webview reload(约 1s,进程不重启,数据无损)** |
 | D4 | 仓库源 | 四平台(github/gitee/gitlab/gitea)仓库主页地址 + 可选 `#分支`;仓库根 **`pv-plugins.json`**;多源可存、**单源生效**、手动刷新;release/beta **每插件各自选通道** |
 | D5 | 安装管线 | 下载(仅 http/https、拒 localhost/环回/私网/保留地址)→ **sha256 校验** → 解压(zip-slip 防护)→ 导入;更新仅提示、由用户手动执行 |
 | D6 | 存储 | 新增 `%APPDATA%\prompt-vault\plugins.json` + `plugins\store\<id>\<版本>\`;现有 `config.json` **结构不动** |
@@ -53,7 +53,7 @@
 
 **新增 Rust 依赖**(全部轻量):`zip`(default-features=false,仅 deflate)、`sha2`、`hmac`、`ureq`(rustls,替代 reqwest 约省 1.8MB)、`keyring`(Windows 凭据管理器)、`notify`(数据文件 watcher)。**不需要** clipboard-win(D11)。
 
-**Tauri 配置变更**:`tauri.conf.json` 开 `app.security.assetProtocol { enable: true, scope: ["$APPDATA/prompt-vault/plugins/**"] }`(插件 JS 经 `convertFileSrc` 注入);`csp` 保持 null(可信插件模型,D1)。
+**Tauri 配置变更**:插件 JS 不经 asset 协议(pv-1 内联注入,`plugin_read_entry` 读源码);`csp` 保持 null(可信插件模型,D1)。
 
 ---
 
@@ -90,12 +90,12 @@ token-monitor/
 
 **权限串语法**:统一 `ns:value` 形状 —— `net:<精确host>`(联网白名单)、`credential:<scope>`(凭据取用,scope 映射规则见 §5.3)、`window:float`(创建悬浮窗);`ui:"panel"` 复用宿主内置排版,不需要单独权限。
 
-### 2.3 插件 JS 契约(经典 script 注入,官方推荐路径)
+### 2.3 插件 JS 契约(pv-1:IIFE 参数闭包 + 一次性注入槽位)
 
-宿主先注入内置桥(应用 bundle 的一部分,挂 `window.pv`),再按 `plugins.json` 启用顺序逐个注入 `main.js`(经 `convertFileSrc` 的 asset URL)。不用 `dynamic import()`(Windows 上 tauri.localhost 与 asset.localhost 跨源 + MIME 坑,已调研否决)。
+宿主把插件 `main.js` 源码经 `plugin_read_entry` 读出,包进 `(function(pv){ "use strict"; …源码… })(window.__pvSlot);` 以 `<script>.textContent` 内联同步执行(不用 `dynamic import()`——Windows 上 tauri.localhost 与 asset.localhost 跨源 + MIME 坑,已调研否决;也不用 asset 协议加载外部脚本——内联注入收窄了 asset 通道攻击面)。桥 pv 随 IIFE 参数闭包封闭:插件在 main.js **顶层捕获 pv** 后,任何异步阶段调用的都是自己的桥,不会被后续插件改写;注入完成后 `__pvSlot` 即被清除,全局不存在任何可再次获取桥的入口(`window.pv` 不存在)。
 
 ```js
-// main.js 可用 API 面(pv-0,版本化;破坏性变更升 pv-1)
+// main.js 可用 API 面(pv-1,版本化)
 pv.panel.register({ id, title, render(el) {} });        // ui:"panel" → 主窗口插件区页签
 pv.window.setup({ size, onMount(el) {} });              // ui:"window" → 宿主为其开专属 WebviewWindow
 pv.commands.register({ id, label, keywords, run });     // 自动进 Ctrl+K 命令面板
@@ -107,7 +107,7 @@ pv.events.on(name, cb) / pv.events.emit(name, payload); // 宿主事件总线(�
 
 ### 2.4 生命周期与失败隔离
 
-- **安装/启用**:管线完成 → 写 `plugins.json`(`enabled: true`)→ 注入 `main.js` **即刻生效**;
+- **安装/启用**:管线完成 → 写 `plugins.json`(`enabled: true`)→ 经 `plugin_read_entry` 读 `main.js` 源码内联注入(pv-1 闭包模型)**即刻生效**;
 - **停用/卸载/更新**:状态落盘 → `location.reload()` → 重载后宿主按新启用清单重新注入(幂等);
 - **加载失败**(语法错误 / 注册超时 3s):toast 报错、该插件标记 `error` 状态,**不拖垮主窗口与其他插件**;重试入口在插件区。
 
@@ -241,7 +241,7 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
 - 核心引入 `I18nProvider` + `t(key)` React context,**全 UI 抽 key**(约几百字符串,20 个组件全量),`zh-CN` 内置为 fallback;**语言切换即时生效,不 reload**;
 - 默认策略:**跟随系统 locale**(非中文 → en,否则 zh-CN);设置里可手动覆盖(存 localStorage);
 - 语言包两条途径并存:
-  1. 市场安装 `type:"i18n"` 插件(zip 内含 `en.json` 等,manifest 声明 `"type":"i18n","ui":"none"`,无权限需求);
+  1. 市场安装 `type:"i18n"` 插件(zip 内含 `en.json` 等,manifest 声明 `"type":"i18n","ui":"none"`,无权限需求);manifest 可声明 `languages` 数组,宿主直接读包内 `<code>.json`;
   2. 手动放 `%APPDATA%\prompt-vault\locales\en.json`(免装即用);
 - 第三方翻译贡献 = 向插件源仓库提 PR 增加语言包;
 - 实施注意:本项目排在批次 2(全量抽 key 是最大单体工作量),期间其他批次的新 UI 直接用 key 写,不留中文硬编码欠账。
