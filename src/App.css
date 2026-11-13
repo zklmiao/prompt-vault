@@ -407,6 +407,26 @@ textarea.mono {
   overflow-y: auto;
 }
 
+/* A9:侧栏底部常驻快捷键提示——纯提示(不可点击、不可选中干扰),独立于列表滚动区外 */
+.sidebar-hints {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 2px 5px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sidebar-hints .kbd {
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
 .row {
   position: relative;
   padding: 10px 40px 10px 40px;

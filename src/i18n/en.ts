@@ -135,6 +135,9 @@ export const en: Partial<Record<ZhKey, string>> = {
   "sidebar.emptyTrash": "Trash is empty.",
   "sidebar.emptyAll": "No favorites yet. Click \"New\" in the top right to add your first prompt.",
   "sidebar.emptyNoMatch": "No matching favorites; try another keyword.",
+  "sidebar.hintPalette": "Command palette",
+  "sidebar.hintCheatsheet": "Cheatsheet",
+  "sidebar.hintSearch": "Search",
 
   /* ---- detail ---- */
   "detail.emptyTitleHasItems": "Select a favorite on the left to see details",

@@ -154,6 +154,20 @@ export default function Sidebar({
           </div>
         )}
       </div>
+      {/* A9:常驻快捷键提示,纯提示不可点击(不新增热区),独立于列表滚动区外 */}
+      <div className="sidebar-hints">
+        <span>
+          <kbd className="kbd">Ctrl+K</kbd> {t("sidebar.hintPalette")}
+        </span>
+        <span>·</span>
+        <span>
+          <kbd className="kbd">?</kbd> {t("sidebar.hintCheatsheet")}
+        </span>
+        <span>·</span>
+        <span>
+          <kbd className="kbd">Ctrl+F</kbd> {t("sidebar.hintSearch")}
+        </span>
+      </div>
     </aside>
   );
 }

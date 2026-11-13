@@ -135,6 +135,9 @@ export const zhCN = {
   "sidebar.emptyTrash": "回收站是空的。",
   "sidebar.emptyAll": "还没有收藏。点击右上角「新建」添加第一条 prompt。",
   "sidebar.emptyNoMatch": "没有匹配的收藏,换个关键词试试。",
+  "sidebar.hintPalette": "命令面板",
+  "sidebar.hintCheatsheet": "快捷键速查表",
+  "sidebar.hintSearch": "搜索",
 
   /* ---- DetailPane 空态与详情 ---- */
   "detail.emptyTitleHasItems": "在左侧选择一条收藏查看详情",
