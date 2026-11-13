@@ -264,18 +264,51 @@ fn validate_git_ref(git_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// gitea 自建主机校验:仅 host[:port] 形状,拒绝 scheme/路径/凭据字符
-fn validate_gitea_host(host: &str) -> Result<(), String> {
+/// gitea 自建主机解析:返回 (是否 http, 规范化 host[:port],含 [IPv6] 形式)。
+/// 支持可选的 "http://" / "https://" 前缀 —— 自建源跟随用户主页地址的 scheme
+/// (http 用于本地/内网静态服务等场景);默认 https。
+fn parse_gitea_target(host: &str) -> Result<(bool, String), String> {
     let host = host.trim();
-    if host.is_empty() || host.len() > 253 {
+    let (use_http, rest) = if let Some(r) = host.strip_prefix("http://") {
+        (true, r)
+    } else if let Some(r) = host.strip_prefix("https://") {
+        (false, r)
+    } else {
+        (false, host)
+    };
+    if rest.is_empty() || rest.len() > 253 {
         return Err("gitea 主机地址长度不合法".to_string());
     }
-    if host.contains("://") || host.contains('/') || host.contains('\\') || host.contains('@') {
-        return Err("gitea 主机地址只需填域名(可选端口),不要带协议或路径".to_string());
+    if rest.contains('/') || rest.contains('\\') || rest.contains('@') {
+        return Err("gitea 主机地址只需填域名(可选端口),不要带路径或凭据".to_string());
     }
-    let (label, port) = match host.split_once(':') {
+    // [IPv6] 形式:方括号内允许十六进制与冒号(v4 映射允许点)
+    if let Some(after) = rest.strip_prefix('[') {
+        let Some(bracket_end) = after.find(']') else {
+            return Err("gitea 主机地址的 IPv6 方括号不闭合".to_string());
+        };
+        let v6 = &after[..bracket_end];
+        if v6.is_empty()
+            || !v6
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.')
+        {
+            return Err("gitea 主机地址的 IPv6 形式不合法".to_string());
+        }
+        let tail = &after[bracket_end + 1..];
+        if !tail.is_empty() {
+            let Some(port) = tail.strip_prefix(':') else {
+                return Err("gitea 主机地址不合法".to_string());
+            };
+            if port.is_empty() || port.len() > 5 || !port.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("gitea 端口不合法".to_string());
+            }
+        }
+        return Ok((use_http, rest.to_string()));
+    }
+    let (label, port) = match rest.split_once(':') {
         Some((l, p)) => (l, Some(p)),
-        None => (host, None),
+        None => (rest, None),
     };
     if label.is_empty() || label.contains("..") {
         return Err("gitea 主机地址不合法".to_string());
@@ -291,7 +324,13 @@ fn validate_gitea_host(host: &str) -> Result<(), String> {
             return Err("gitea 端口不合法".to_string());
         }
     }
-    Ok(())
+    Ok((use_http, rest.to_string()))
+}
+
+/// gitea 自建主机校验(旧布尔语义入口,内部走 parse_gitea_target)
+#[cfg(test)]
+fn validate_gitea_host(host: &str) -> Result<(), String> {
+    parse_gitea_target(host).map(|_| ())
 }
 
 /// 四平台 raw 清单 URL 推导(设计 §3.1;gitea 为自建域名,须过 SSRF 校验)
@@ -322,8 +361,9 @@ fn source_raw_url(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "gitea 源需要提供主机地址".to_string())?;
-            validate_gitea_host(h)?;
-            Ok(format!("https://{h}/{owner}/{repo}/raw/{git_ref}/pv-plugins.json"))
+            let (use_http, cleaned) = parse_gitea_target(h)?;
+            let scheme = if use_http { "http" } else { "https" };
+            Ok(format!("{scheme}://{cleaned}/{owner}/{repo}/raw/{git_ref}/pv-plugins.json"))
         }
         other => Err(format!("不支持的平台类型:{other}")),
     }
@@ -1272,6 +1312,18 @@ mod tests {
                 .unwrap(),
             "https://git.example.com:3000/pv/plugins/raw/main/pv-plugins.json"
         );
+        // 自建源跟随主页地址 scheme:http 前缀 → http raw URL
+        assert_eq!(
+            source_raw_url("gitea", "pv", "plugins", Some("http://192.168.1.5:8899"), "main")
+                .unwrap(),
+            "http://192.168.1.5:8899/pv/plugins/raw/main/pv-plugins.json"
+        );
+        // IPv6 方括号形式
+        assert_eq!(
+            source_raw_url("gitea", "pv", "plugins", Some("[240e:1:2::9]:8899"), "main")
+                .unwrap(),
+            "https://[240e:1:2::9]:8899/pv/plugins/raw/main/pv-plugins.json"
+        );
         assert!(source_raw_url("gitea", "pv", "plugins", None, "main").is_err());
         assert!(source_raw_url("sourcehut", "pv", "plugins", None, "main").is_err());
     }
@@ -1300,14 +1352,18 @@ mod tests {
         }
         assert!(validate_gitea_host("git.example.com").is_ok());
         assert!(validate_gitea_host("git.example.com:3000").is_ok());
+        assert!(validate_gitea_host("http://git.example.com").is_ok());
+        assert!(validate_gitea_host("[240e:1:2::9]:8899").is_ok());
+        assert!(validate_gitea_host("[240e:1:2::9]").is_ok());
         for bad in [
             "",
-            "https://git.example.com",
             "git.example.com/path",
             "user@git.example.com",
             "gi..t.example.com",
             "git.example.com:",
             "git.example.com:30a0",
+            "[240e:1:2::9",
+            "[fe80::1%25]:8899",
         ] {
             assert!(validate_gitea_host(bad).is_err(), "「{bad}」应被拒绝");
         }
