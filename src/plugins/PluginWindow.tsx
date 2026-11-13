@@ -16,6 +16,10 @@ export default function PluginWindow({ pluginId }: { pluginId: string }) {
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
+  // t 经 ref 取最新值:t 不进 effect 依赖 —— 注入会把插件 i18n 字典并入快照,
+  // t 身份随之变化,若进依赖会「注入 → t 变 → 重跑注入」死循环(App.tsx 同模式)
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
     if (startedRef.current) return; // StrictMode 双挂载只注入一次
@@ -26,7 +30,7 @@ export default function PluginWindow({ pluginId }: { pluginId: string }) {
         await injectOne(pluginId);
         const setup = getWindowSetup(pluginId);
         if (!setup) {
-          throw new Error(t("pw.noSetup"));
+          throw new Error(tRef.current("pw.noSetup"));
         }
         if (cancelled) return;
         setStatus("ready");
@@ -44,8 +48,11 @@ export default function PluginWindow({ pluginId }: { pluginId: string }) {
     })();
     return () => {
       cancelled = true;
+      // StrictMode 双挂载(dev/预览):首次 effect 的异步注入会被本 cleanup 取消,
+      // 必须复位守卫让二次挂载重新注入,否则窗口永久停在「加载中」
+      startedRef.current = false;
     };
-  }, [pluginId, t]);
+  }, [pluginId]);
 
   return (
     <div className="plugin-window-root">
