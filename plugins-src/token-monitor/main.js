@@ -540,7 +540,9 @@
     ensureTmStyles();
     el.innerHTML = '';
     var wrap = tmEl('div', 'pv-tm-wrap');
-    wrap.setAttribute('data-tauri-drag-region', '');
+    // 不挂 data-tauri-drag-region:原生脚本的双击 = 切换最大化,84px 透明球窗
+    // 被最大化成全屏透明窗口后会拦截全部鼠标事件(冒烟实测);
+    // 拖动统一走球体的「按住超阈值 → plugin_start_drag」自定义路径
     wrap.addEventListener('contextmenu', function (e) {
       e.preventDefault();
       openTmMenu(wrap);
