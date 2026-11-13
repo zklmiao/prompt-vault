@@ -407,6 +407,12 @@ function mockNowIso(): string {
   return new Date().toISOString();
 }
 
+/** 预览断言用:记录关键调用路径(浏览器预览里可读 window.__pvMockCalls) */
+export const mockCalls: string[] = [];
+if (typeof window !== "undefined") {
+  (window as unknown as { __pvMockCalls: string[] }).__pvMockCalls = mockCalls;
+}
+
 export async function invoke(cmd: string, args?: Record<string, unknown>) {
   switch (cmd) {
     case "get_data_path":
@@ -446,10 +452,15 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     case "win_is_maximized":
       return false;
     case "hide_quickpick":
+      mockCalls.push("hide_quickpick");
       console.log("[mock] hide_quickpick");
       return null;
     case "open_editor":
       console.log("[mock] open_editor", args?.id);
+      return null;
+    case "open_new":
+      mockCalls.push("open_new");
+      console.log("[mock] open_new");
       return null;
     case "app_exe_path":
       return "C:\\mock\\prompt-vault.exe";

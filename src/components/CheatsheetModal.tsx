@@ -62,6 +62,7 @@ export default function CheatsheetModal({ hotkeys, onClose }: Props) {
         { keys: ["Enter"], desc: t("cheat.tagEnter") },
         { keys: ["Enter"], desc: t("cheat.phEnter") },
         { keys: ["↑ ↓", "Enter", "Esc"], desc: t("cheat.qpKeys") },
+        { keys: ["Ctrl+N"], desc: t("cheat.qpCtrlN") },
         { keys: ["Ctrl+A"], desc: t("cheat.ctrlA") },
         { keys: ["Esc"], desc: t("cheat.escModal") },
       ],

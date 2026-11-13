@@ -58,6 +58,9 @@ export const hideQuickpick = (): Promise<void> =>
 export const openEditor = (id: string): Promise<void> =>
   invoke("open_editor", { id });
 
+/** 从快速拾取窗口唤出主窗口并进入空白新建态(剪贴板速存仍归全局热键) */
+export const openNewPrompt = (): Promise<void> => invoke("open_new");
+
 /** 本机应用 exe 绝对路径(MCP 面板四页签片段自动填充) */
 export const appExePath = (): Promise<string> => invoke("app_exe_path");
 

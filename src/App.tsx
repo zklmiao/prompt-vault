@@ -491,6 +491,31 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      try {
+        // 快速拾取窗口按 Ctrl+N:唤出主窗口并进入空白新建态(清弹层集对齐 open-editor;
+        // 剪贴板速存职责仍归全局 Alt+Shift+N,不碰 clipboard-new 语义)
+        const u6 = await listen("open-new", () => {
+          setTrashOpen(false);
+          setSearch("");
+          setActiveTag(null);
+          setCopyTarget(null);
+          setPurgeTarget(null);
+          setImportCandidate(null);
+          setBatchPurgeOpen(false);
+          setSettingsOpen(false);
+          setSelectedId(null);
+          setPrefill(null);
+          setPrefillSeq((s) => s + 1);
+          setMode({ kind: "new" });
+        });
+        if (disposed) {
+          u6();
+          return;
+        }
+        unlistens.push(u6);
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       disposed = true;

@@ -6,6 +6,7 @@ import {
   getDataPath,
   hideQuickpick,
   openEditor,
+  openNewPrompt,
   readDataFile,
 } from "./api";
 import {
@@ -262,6 +263,19 @@ export default function QuickPick() {
       return;
     }
     if (fillTarget) return;
+    if (
+      e.ctrlKey &&
+      !e.shiftKey &&
+      !e.altKey &&
+      (e.key === "n" || e.key === "N")
+    ) {
+      // Ctrl+N:唤出主窗口进入空白新建态(位于 copied/fillTarget 两道拦截之后,
+      // 确认态与变量弹窗期间不响应;剪贴板速存仍归全局 Alt+Shift+N)
+      e.preventDefault();
+      void openNewPrompt();
+      finish();
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setIdx((i) => (flat.length ? (i + 1) % flat.length : 0));
@@ -409,6 +423,7 @@ export default function QuickPick() {
         <div className="qp-footer">
           <span>{t("qp.footerCopy")}</span>
           <span>{t("qp.footerEdit")}</span>
+          <span>{t("qp.footerNew")}</span>
           <span>{t("qp.footerClose")}</span>
         </div>
         {copied && (
