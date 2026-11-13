@@ -2,7 +2,7 @@
   "id": "token-monitor",
   "name": "Coding 套餐用量监控",
   "version": "1.0.0",
-  "minAppVersion": "0.2.0",
+  "minAppVersion": "0.2.0-alpha",
   "type": "standard",
   "ui": "window",
   "permissions": [

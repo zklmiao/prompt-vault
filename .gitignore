@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# tsc 增量构建产物
+*.tsbuildinfo
+
 # Prompt Vault 数据文件(可能被选在工程内 data/ 目录)
 data/
 *.bak

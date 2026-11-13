@@ -1649,15 +1649,12 @@ mod tests {
         "permissions": ["net:example.com", "window:float"]
     }"#;
 
-    const MANIFEST_MIN_020: &str = r#"{
-        "id": "token-monitor",
-        "name": "Coding 套餐用量监控",
-        "version": "1.0.0",
-        "minAppVersion": "0.2.0",
-        "type": "standard",
-        "ui": "window",
-        "permissions": ["net:open.bigmodel.cn"]
-    }"#;
+    /// 版本门向量夹具:token-monitor 形状的 manifest,可传任意 minAppVersion
+    fn token_monitor_manifest(min_app_version: &str) -> String {
+        format!(
+            r#"{{ "id": "token-monitor", "name": "Coding 套餐用量监控", "version": "1.0.0", "minAppVersion": "{min_app_version}", "type": "standard", "ui": "window", "permissions": ["net:open.bigmodel.cn"] }}"#
+        )
+    }
 
     /* ---- 源 URL 推导与 ref 回退 ---- */
 
@@ -2121,28 +2118,55 @@ mod tests {
     }
 
     #[test]
-    fn install_rejects_low_app_version() {
-        let root = temp_root("install-gate");
-        let zip_bytes = make_zip(
-            &[("manifest.json", MANIFEST_MIN_020.as_bytes())],
-            &[],
-        );
-        let sha = sha_of(&zip_bytes);
-        // 当前应用 0.1.9-alpha.2 < minAppVersion 0.2.0 → 拒绝(token-monitor 的预期行为)
-        let err = install_from_bytes(
-            &root, &zip_bytes, &sha, "release", "token-monitor", "1.0.0", "0.1.9-alpha.2", None,
-        )
-        .unwrap_err();
-        let InstallError::Other(msg) = err else {
-            panic!("应为 Other 错误");
+    fn install_version_gate_app_version_vectors() {
+        // 向量式版本门:显式传 app 版本,与环境 CARGO_PKG_VERSION 解耦
+        // (升版 0.2.0-alpha 后判定反转的根因:semver 预发布 < 正式版)
+        let install_with = |min: &str, app: &str, tag: &str| {
+            let root = temp_root(tag);
+            let manifest = token_monitor_manifest(min);
+            let zip_bytes = make_zip(&[("manifest.json", manifest.as_bytes())], &[]);
+            let result = install_from_bytes(
+                &root,
+                &zip_bytes,
+                &sha_of(&zip_bytes),
+                "release",
+                "token-monitor",
+                "1.0.0",
+                app,
+                None,
+            );
+            (root, result)
         };
-        assert!(msg.contains("应用版本过低"), "应报版本门错误:{msg}");
-        assert!(!root.store_dir("token-monitor").exists());
-        // 放宽应用版本后同一包可安装
-        install_from_bytes(
-            &root, &zip_bytes, &sha, "release", "token-monitor", "1.0.0", "0.2.0", None,
-        )
-        .unwrap_or_else(|e| panic!("满足 minAppVersion 时应成功:{e:?}"));
+        for (min, app, expect_ok, tag) in [
+            // 卡面断言集
+            ("0.2.0-alpha", "0.2.0-alpha", true, "gate-eq-pre"), // 本家未发布插件:同版本放行
+            ("0.2.0", "0.2.0-alpha", false, "gate-pre-lt-stable"), // 预发布 < 正式版 → 拒
+            ("0.1.9", "0.2.0-alpha", true, "gate-old-min"),      // 0.1.x 老要求放行
+            ("0.1.0", "0.2.0-alpha", true, "gate-old-min2"),
+            // 保留批次 1 既有覆盖:相等放行 / 更低 app 拒绝
+            ("0.2.0", "0.2.0", true, "gate-eq-stable"),
+            ("0.2.0", "0.1.9-alpha.2", false, "gate-legacy-reject"),
+        ] {
+            let (root, result) = install_with(min, app, tag);
+            match (expect_ok, result) {
+                (true, Ok(_)) => {
+                    assert!(
+                        root.store_dir("token-monitor").exists(),
+                        "app={app} ≥ min={min} 应落盘安装"
+                    );
+                }
+                (false, Err(InstallError::Other(msg))) => {
+                    assert!(
+                        msg.contains("应用版本过低"),
+                        "app={app} < min={min} 应报版本门错误:{msg}"
+                    );
+                    assert!(!root.store_dir("token-monitor").exists(), "拒绝后不应落盘");
+                }
+                (expect, got) => panic!(
+                    "向量 min={min} app={app} 判定不符:期望放行={expect},实际={got:?}"
+                ),
+            }
+        }
     }
 
     #[test]
