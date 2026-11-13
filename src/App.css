@@ -2025,3 +2025,76 @@ mark.hl {
 .ph-panel-host {
   padding: 4px 2px;
 }
+
+/* MCP Server 固定卡片(批次 4;内置能力,置于已安装列表上方) */
+.ph-mcp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.ph-mcp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 风险明示:常驻不折叠 */
+.ph-mcp-risk {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--danger-soft);
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+
+.ph-mcp-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ph-mcp-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--body-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+.ph-mcp-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ph-mcp-tools {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ph-mcp-tools-title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.ph-mcp-tools ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.5;
+}

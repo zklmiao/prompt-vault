@@ -375,4 +375,25 @@ export const en: Partial<Record<ZhKey, string>> = {
   "pw.loadFailed": "Plugin load failed: {msg}",
   "pw.loading": "Loading plugin…",
   "pw.noSetup": "Plugin did not call pv.window.setup",
+
+  /* ---- MCP Server card (PluginHub.tsx; snippets live in code, see buildMcpSnippets) ---- */
+  "mcp.title": "MCP Server",
+  "mcp.badgeBuiltIn": "Built-in · not a plugin",
+  "mcp.statusOn": "Enabled",
+  "mcp.statusOff": "Disabled",
+  "mcp.riskNotice":
+    "Any configured AI client can search all favorites (excluding trash) and add new entries (source marked as MCP).",
+  "mcp.tabClaudeCode": "Claude Code",
+  "mcp.tabCodex": "Codex (config.toml)",
+  "mcp.tabOpencode": "OpenCode (opencode.json)",
+  "mcp.tabMcpJson": "Generic mcpJson (Claude Desktop / Cursor)",
+  "mcp.exeUnavailable": "Cannot determine the app path; config snippets unavailable.",
+  "mcp.toolsTitle": "Exposed tools and templates",
+  "mcp.toolSearch": "search_prompts: fuzzy-search favorites by keyword (default 10, max 50)",
+  "mcp.toolGet": "get_prompt: read the full body, tags, source and note by id",
+  "mcp.toolList": "list_tags: list all tags with usage counts",
+  "mcp.toolSave": "save_prompt: add a favorite (append-only, source defaults to MCP)",
+  "mcp.templateNote": "Every favorite is also a template: {{placeholders}} become fill-in arguments.",
+  "mcp.toastSaved": "Saved; takes effect the next time an MCP client launches it",
+  "mcp.toastSaveFailed": "Failed to save the MCP toggle: {msg}",
 };

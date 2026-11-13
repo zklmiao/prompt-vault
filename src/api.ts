@@ -58,6 +58,9 @@ export const hideQuickpick = (): Promise<void> =>
 export const openEditor = (id: string): Promise<void> =>
   invoke("open_editor", { id });
 
+/** 本机应用 exe 绝对路径(MCP 面板四页签片段自动填充) */
+export const appExePath = (): Promise<string> => invoke("app_exe_path");
+
 // ---- 自绘标题栏的窗口控制 ----
 export const winMinimize = (): Promise<void> => invoke("win_minimize");
 export const winToggleMaximize = (): Promise<void> =>

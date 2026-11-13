@@ -376,6 +376,27 @@ export const zhCN = {
   "pw.loadFailed": "插件加载失败:{msg}",
   "pw.loading": "插件加载中…",
   "pw.noSetup": "插件未调用 pv.window.setup",
+
+  /* ---- MCP Server 固定卡片(PluginHub.tsx;片段代码不进目录,见 buildMcpSnippets)---- */
+  "mcp.title": "MCP Server",
+  "mcp.badgeBuiltIn": "内置能力 · 非插件",
+  "mcp.statusOn": "已启用",
+  "mcp.statusOff": "已禁用",
+  "mcp.riskNotice":
+    "配置过的 AI 客户端均可检索全部收藏(不含回收站),并可新增条目(source 标记为 MCP)。",
+  "mcp.tabClaudeCode": "Claude Code",
+  "mcp.tabCodex": "Codex(config.toml)",
+  "mcp.tabOpencode": "OpenCode(opencode.json)",
+  "mcp.tabMcpJson": "通用 mcpJson(Claude Desktop / Cursor)",
+  "mcp.exeUnavailable": "无法获取应用路径,配置片段不可用。",
+  "mcp.toolsTitle": "暴露的工具与模板",
+  "mcp.toolSearch": "search_prompts:按关键词模糊检索收藏(默认 10 条,上限 50)",
+  "mcp.toolGet": "get_prompt:按 id 读取完整正文、标签、来源与备注",
+  "mcp.toolList": "list_tags:列出全部标签及使用计数",
+  "mcp.toolSave": "save_prompt:新增收藏条目(只增不删不改,来源默认标记为 MCP)",
+  "mcp.templateNote": "每条收藏也是一个模板,{{变量}} 会成为填空参数。",
+  "mcp.toastSaved": "已保存;下次 MCP 客户端拉起时生效",
+  "mcp.toastSaveFailed": "MCP 开关保存失败:{msg}",
 } as const;
 
 export type ZhKey = keyof typeof zhCN;

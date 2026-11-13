@@ -242,3 +242,15 @@ export function IconWindow(p: IconProps) {
     </Svg>
   );
 }
+
+/** MCP Server(插头:即插即用的协议连接器) */
+export function IconMcp(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9 3.5V7" />
+      <path d="M15 3.5V7" />
+      <path d="M5.5 7h13v4.5a6.5 6.5 0 0 1-13 0V7z" />
+      <path d="M12 18v3" />
+    </Svg>
+  );
+}

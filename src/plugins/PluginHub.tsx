@@ -3,10 +3,13 @@
 // 弹层(Modal/ConfirmModal)沿用既有组件与守卫模式。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { appExePath, copyToClipboard } from "../api";
 import ConfirmModal from "../components/ConfirmModal";
 import Modal from "../components/Modal";
 import {
+  IconCopy,
   IconMarket,
+  IconMcp,
   IconPlugin,
   IconRefresh,
   IconTrash,
@@ -355,6 +358,27 @@ export default function PluginHub({
     [mutateState],
   );
 
+  /* ---------- MCP Server 固定卡片 ---------- */
+
+  /** MCP 开关:落盘后重读为准(不做乐观更新);失败 toast err 并回读复位开关 */
+  const toggleMcp = useCallback(async () => {
+    if (!state) return;
+    const next: PluginsState = JSON.parse(JSON.stringify(state));
+    next.mcp = { enabled: !next.mcp.enabled };
+    try {
+      await savePluginsState(next);
+      await reloadState();
+      showToast(t("mcp.toastSaved"));
+    } catch (e) {
+      showToast(
+        t("mcp.toastSaveFailed", { msg: e instanceof Error ? e.message : String(e) }),
+        "err",
+      );
+      // 落盘失败:重读磁盘状态,开关复位到真实值
+      await reloadState().catch(() => {});
+    }
+  }, [state, reloadState, showToast, t]);
+
   /* ---------- 渲染 ---------- */
 
   const installedRows = useMemo(() => {
@@ -372,6 +396,11 @@ export default function PluginHub({
 
   const renderInstalled = () => (
     <div className="ph-list">
+      <McpCard
+        enabled={state?.mcp.enabled ?? false}
+        onToggle={() => void toggleMcp()}
+        showToast={showToast}
+      />
       {installedRows.length === 0 ? (
         <div className="ph-empty">{t("ph.emptyInstalled")}</div>
       ) : (
@@ -705,6 +734,150 @@ function MarketRow({
               ? t("ph.installVersion", { version: ref.version })
               : t("ph.noPackage")}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- MCP Server 固定卡片(批次 4;内置能力非插件,无卸载/通道) ---------- */
+
+type McpTab = "claude" | "codex" | "opencode" | "mcpjson";
+
+const MCP_TABS: Array<{ id: McpTab; labelKey: string }> = [
+  { id: "claude", labelKey: "mcp.tabClaudeCode" },
+  { id: "codex", labelKey: "mcp.tabCodex" },
+  { id: "opencode", labelKey: "mcp.tabOpencode" },
+  { id: "mcpjson", labelKey: "mcp.tabMcpJson" },
+];
+
+/**
+ * 四页签配置片段(代码组装,exe 插值;文案不进 i18n —— 各客户端片段与
+ * 界面语言无关,进语言包纯属膨胀)。
+ * 引号规则:命令行(Claude Code)路径含空格才用双引号包裹;JSON 由
+ * JSON.stringify 处理引号与转义;TOML 基本字符串中反斜杠是转义符,
+ * Windows 路径需逐个翻倍,否则 "\U" 会被当成 unicode 转义导致配置非法。
+ * OpenCode 层级按官方文档(2026-11-14 核实)为 mcp.servers.<name>。
+ */
+export function buildMcpSnippets(exePath: string): Record<McpTab, string> {
+  const commandLine = exePath.includes(" ") ? `"${exePath}"` : exePath;
+  const tomlString = `"${exePath.replace(/\\/g, "\\\\")}"`;
+  return {
+    claude: `claude mcp add prompt-vault -- ${commandLine} --mcp`,
+    codex: `[mcp_servers.prompt-vault]\ncommand = ${tomlString}\nargs = ["--mcp"]`,
+    opencode: JSON.stringify(
+      {
+        mcp: {
+          servers: {
+            "prompt-vault": { type: "local", command: [exePath, "--mcp"] },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    mcpjson: JSON.stringify(
+      {
+        mcpServers: { "prompt-vault": { command: exePath, args: ["--mcp"] } },
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+function McpCard({
+  enabled,
+  onToggle,
+  showToast,
+}: {
+  enabled: boolean;
+  onToggle(): void;
+  showToast(text: string, kind?: "ok" | "err"): void;
+}) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<McpTab>("claude");
+  const [exePath, setExePath] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    appExePath()
+      .then((p) => {
+        if (alive) setExePath(p);
+      })
+      .catch(() => {
+        if (alive) setExePath(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const snippet = exePath ? buildMcpSnippets(exePath)[tab] : null;
+
+  const copySnippet = useCallback(async () => {
+    if (!snippet) return;
+    try {
+      await copyToClipboard(snippet);
+      showToast(t("toast.copied"));
+    } catch (e) {
+      showToast(t("toast.copyFailed", { msg: String(e) }), "err");
+    }
+  }, [snippet, showToast, t]);
+
+  return (
+    <div className="ph-mcp-card">
+      <div className="ph-mcp-head">
+        <div className="ph-row-title">
+          <IconMcp size={16} />
+          {t("mcp.title")}
+          <span className="badge">{t("mcp.badgeBuiltIn")}</span>
+          <span className={"badge" + (enabled ? " ok" : "")}>
+            {enabled ? t("mcp.statusOn") : t("mcp.statusOff")}
+          </span>
+        </div>
+        <label
+          className="switch"
+          title={enabled ? t("ph.toggleDisable") : t("ph.toggleEnable")}
+        >
+          <input type="checkbox" checked={enabled} onChange={onToggle} />
+          <span />
+        </label>
+      </div>
+      {/* 风险明示:常驻不折叠 */}
+      <div className="ph-mcp-risk">{t("mcp.riskNotice")}</div>
+      <div className="ph-mcp-tabs" role="tablist">
+        {MCP_TABS.map(({ id, labelKey }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={"ph-seg" + (tab === id ? " active" : "")}
+            onClick={() => setTab(id)}
+          >
+            {t(labelKey)}
+          </button>
+        ))}
+      </div>
+      {snippet !== null ? (
+        <>
+          <pre className="ph-mcp-code mono">{snippet}</pre>
+          <div className="ph-mcp-actions">
+            <button className="btn small" onClick={() => void copySnippet()}>
+              <IconCopy size={14} /> {t("common.copy")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="ph-empty">{t("mcp.exeUnavailable")}</div>
+      )}
+      <div className="ph-mcp-tools">
+        <div className="ph-mcp-tools-title">{t("mcp.toolsTitle")}</div>
+        <ul>
+          <li>{t("mcp.toolSearch")}</li>
+          <li>{t("mcp.toolGet")}</li>
+          <li>{t("mcp.toolList")}</li>
+          <li>{t("mcp.toolSave")}</li>
+          <li>{t("mcp.templateNote")}</li>
+        </ul>
       </div>
     </div>
   );
