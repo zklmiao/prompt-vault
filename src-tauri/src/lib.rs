@@ -16,6 +16,7 @@ mod credentials;
 mod data_lock;
 mod data_watch;
 mod fuzzy;
+mod i18n;
 mod mcp;
 mod net;
 mod plugins;
@@ -607,7 +608,9 @@ pub fn run() {
             plugins::plugin_read_entry,
             plugins::plugin_installed_manifest,
             plugins::plugin_open_window,
-            plugins::plugin_close_window
+            plugins::plugin_close_window,
+            i18n::i18n_locales,
+            i18n::i18n_locale_file
         ])
         .setup(move |app| {
             // 恢复上次记住的主窗口位置与大小
