@@ -864,10 +864,14 @@
         void pv.storage.set(KV_POLL, cfg).catch(function () {});
       };
       pollCheck.addEventListener('change', persistPoll);
-      pollInput.addEventListener('change', function (e) {
-        if (e.isComposing) return; // IME 守卫(沿用现有模式)
+      var persistInterval = function (e) {
+        if (e && e.isComposing) return; // IME 守卫(沿用现有模式)
         persistPoll();
-      });
+      };
+      // change + blur 双监听:个别环境 blur 时不派发 change(预览 IAB 实测),
+      // blur 兜底保证失焦即持久化
+      pollInput.addEventListener('change', persistInterval);
+      pollInput.addEventListener('blur', persistInterval);
       pv.storage.get(KV_POLL).then(function (cfg) {
         pollCheck.checked = !!(cfg && cfg.enabled === true);
         pollInput.value = cfg && cfg.intervalSec ? String(clampPollSec(cfg.intervalSec)) : String(POLL_DEFAULT_SEC);
