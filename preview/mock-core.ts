@@ -182,6 +182,59 @@ const MOCK_MANIFESTS: Record<string, Record<string, unknown>> = {
     ui: "none",
     permissions: ["net:example.com", "window:float"],
   },
+  "demo-clock": {
+    id: "demo-clock",
+    name: "时钟面板(预览)",
+    version: "1.0.0",
+    minAppVersion: "0.1.0",
+    type: "standard",
+    ui: "panel",
+    permissions: [],
+  },
+};
+
+/**
+ * 假插件的包内文件(pv-1:plugin_read_entry 返回源码,宿主包进 IIFE 内联执行,
+ * 假插件在预览里可真实注入)。两个插件用于对抗性验证:
+ *   - demo-hello(探针 A):顶层捕获桥 → 延迟 400ms(晚于 demo-clock 注入)后
+ *     写 KV,断言记录落在 A 自己的 pluginId 下;
+ *   - demo-clock(B):注入时立即注册面板。
+ * 源码均为 pv-1 形态:只写 IIFE 函数体,直接使用闭包参数 pv,不引用 window.pv。
+ */
+const MOCK_PLUGIN_SOURCES: Record<string, Record<string, string>> = {
+  "demo-hello": {
+    "main.js": `// pv-1 探针 A:顶层捕获桥 → 延迟到后续插件注入完成后写 KV,验证归属
+var mine = pv;
+pv.commands.register({
+  id: 'hello',
+  label: '演示:问候(预览)',
+  keywords: ['demo'],
+  run: function () {
+    console.log('[demo-hello] hello at', new Date().toISOString());
+  }
+});
+window.setTimeout(function () {
+  void mine.storage.set('probe', {
+    from: mine.pluginId,
+    bridgeVersion: mine.version,
+    at: new Date().toISOString()
+  });
+}, 400);
+`,
+  },
+  "demo-clock": {
+    "main.js": `// pv-1 插件 B:注入时立即注册面板
+pv.panel.register({
+  id: 'clock',
+  title: '时钟(预览)',
+  render: function (el) {
+    var tick = function () { el.textContent = new Date().toLocaleTimeString(); };
+    tick();
+    window.setInterval(tick, 1000);
+  }
+});
+`,
+  },
 };
 
 interface MockChannel {
@@ -208,7 +261,7 @@ const MOCK_MARKET: {
     {
       id: "demo-hello",
       name: "演示插件",
-      desc: "可安装/停用/卸载的假插件,用于预览走查",
+      desc: "可安装/停用/卸载的假插件,用于预览走查(pv-1 探针)",
       release: {
         version: "1.0.0",
         url: "https://mock.local/demo-hello-1.0.0.zip",
@@ -221,6 +274,19 @@ const MOCK_MARKET: {
       },
       minAppVersion: "0.1.0",
       permissions: ["net:example.com", "window:float"],
+    },
+    {
+      id: "demo-clock",
+      name: "时钟面板",
+      desc: "ui:panel 假插件,注入后注册插件区页签",
+      release: {
+        version: "1.0.0",
+        url: "https://mock.local/demo-clock-1.0.0.zip",
+        sha256: "cc".repeat(32),
+      },
+      beta: null,
+      minAppVersion: "0.1.0",
+      permissions: [],
     },
   ],
 };
@@ -324,9 +390,12 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
       const id = String(args?.pluginId ?? "");
       return (MOCK_MANIFESTS[id] as Record<string, unknown> | undefined) ?? null;
     }
-    case "plugin_entry_path":
-      // 预览无真实文件:返回 null,让注入走失败隔离路径(标记 error + toast)
-      return null;
+    case "plugin_read_entry": {
+      const id = String(args?.pluginId ?? "");
+      const rel = String(args?.relPath ?? "");
+      const source = MOCK_PLUGIN_SOURCES[id]?.[rel];
+      return source ?? null;
+    }
     case "plugin_kv_get": {
       try {
         const raw = localStorage.getItem(`pv-mock-kv:${String(args?.pluginId ?? "")}`);
@@ -361,9 +430,4 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
   }
-}
-
-/** 文件路径 → asset 协议 URL 的 mock(注入走不到真实文件,保持形状一致) */
-export function convertFileSrc(filePath: string, protocol = "asset"): string {
-  return `${protocol}-mock:///${encodeURIComponent(filePath)}`;
 }

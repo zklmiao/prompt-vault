@@ -604,7 +604,7 @@ pub fn run() {
             plugins::plugin_write_state,
             plugins::plugin_kv_get,
             plugins::plugin_kv_set,
-            plugins::plugin_entry_path,
+            plugins::plugin_read_entry,
             plugins::plugin_installed_manifest,
             plugins::plugin_open_window,
             plugins::plugin_close_window
@@ -623,13 +623,6 @@ pub fn run() {
             if let Some(dp) = cfg.data_path.clone() {
                 data_watch::start(app.handle(), PathBuf::from(dp));
             }
-
-            // 插件 JS 加载通道:把 plugins 目录加入 asset 协议允许范围(运行时扩展)。
-            // tauri.conf.json 仅开启 assetProtocol,scope 留默认空;插件 main.js 经
-            // convertFileSrc 注入主窗口/插件窗口,不给全局可读范围。
-            let _ = app
-                .asset_protocol_scope()
-                .allow_directory(plugins::plugins_root(), true);
 
             // 注册全局快捷键:配置优先,解析/注册失败回退默认并自愈配置
             #[cfg(desktop)]

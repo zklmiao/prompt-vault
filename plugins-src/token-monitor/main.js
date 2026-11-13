@@ -8,6 +8,9 @@
  *   - tokens24h 仅 GLM;mcpMonthly 仅 GLM(MCP 月度,字段原样透传)。
  *
  * 约定:
+ *   - pv-1 书写形态:本文件只写 IIFE 函数体,由宿主包进
+ *     (function(pv){ "use strict"; … })(window.__pvSlot) 内联执行;
+ *     桥随闭包参数 pv 封闭,本文件不引用 window.pv;
  *   - 所有网络请求一律经宿主桥 pv.net.fetch(url, { authFrom, mode }) 走 Rust 代理,
  *     host 白名单 / SSRF 校验 / 认证注入(含火山 V4 签名)都在 Rust 内完成,
  *     Key 明文不出 Rust 进程,本文件接触不到任何凭据;
@@ -15,8 +18,6 @@
  *   - 圆球 UI(圆环进度 / 左键轮换 / 右键菜单,见设计文档 §5.1)由主线接手,
  *     届时调 pv.window.setup({ size, onMount }) 并消费 window.pvTokenMonitor。
  */
-(function () {
-  'use strict';
 
   // ============ 常量:三家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
 
@@ -204,12 +205,12 @@
     }
   }
 
-  /** 桥可用性与非 2xx 统一处理;成功返回响应体文本 */
+  /** 桥可用性与非 2xx 统一处理;成功返回响应体文本(pv 经闭包参数封闭) */
   function callNet(url, opts) {
-    if (!window.pv || !window.pv.net || typeof window.pv.net.fetch !== 'function') {
+    if (!pv || !pv.net || typeof pv.net.fetch !== 'function') {
       return Promise.reject(new Error('宿主桥未就绪:pv.net.fetch 不可用'));
     }
-    return window.pv.net.fetch(url, opts).then(function (resp) {
+    return pv.net.fetch(url, opts).then(function (resp) {
       if (!resp || typeof resp.status !== 'number' || typeof resp.body !== 'string') {
         throw new Error('pv.net.fetch 返回结构异常');
       }
@@ -304,4 +305,3 @@
     parseOpencodeUsage: parseOpencodeUsage,
     glmDayRange: glmDayRange
   };
-})();

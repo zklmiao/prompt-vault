@@ -1,5 +1,5 @@
-// 插件注册表:pv.* 各通道注册内容的内存登记处(经典 script 注入模型,
-// 每次注入前重设 window.pv 绑定;重启/重载后由宿主按 plugins.json 重新注入)。
+// 插件注册表:pv.* 各通道注册内容的内存登记处(pv-1 注入模型,桥经 IIFE
+// 参数闭包封闭;重启/重载后由宿主按 plugins.json 重新注入)。
 
 export interface PvPanelDef {
   id: string;

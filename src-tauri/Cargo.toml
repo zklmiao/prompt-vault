@@ -18,8 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# protocol-asset:插件 JS 经 convertFileSrc 注入所需(asset 协议 + 运行时 scope 扩展)
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+# 插件 JS 改经 plugin_read_entry 内联注入(pv-1),不再需要 protocol-asset feature
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-single-instance = "2"

@@ -12,8 +12,9 @@
 //! - 插件沙箱 KV `plugin_kv_get` / `plugin_kv_set`:`plugins\data\<id>\kv.json`;
 //! - 插件窗口 `plugin_open_window` / `plugin_close_window`:
 //!   ui:"window" 插件的专属无边框置顶窗口(label = pv-plugin-<id>);
-//! - 注入辅助 `plugin_entry_path` / `plugin_installed_manifest`:
-//!   主窗口按 enabled 顺序注入 main.js 前解析当前版本目录与包内 manifest。
+//! - 注入辅助 `plugin_read_entry` / `plugin_installed_manifest`:
+//!   主窗口按 enabled 顺序注入 main.js(pv-1 内联注入)与消费语言包 JSON 前,
+//!   从当前版本目录读包内文件内容,并解析包内 manifest。
 //!
 //! 存储布局(%APPDATA%\prompt-vault\):
 //!   plugins.json                 —— 宿主状态(契约见开工卡 B,读端已存在于 net.rs/mcp)
@@ -73,7 +74,8 @@ fn plugins_file_path() -> PathBuf {
     crate::config_file_path().with_file_name("plugins.json")
 }
 
-/// 插件存储根目录:%APPDATA%\prompt-vault\plugins(setup 里加入 asset 协议范围)
+/// 插件存储根目录:%APPDATA%\prompt-vault\plugins
+/// (pv-1 内联注入后宿主经 plugin_read_entry 读取包内文件,不再走 asset 协议)
 pub(crate) fn plugins_root() -> PathBuf {
     crate::config_file_path()
         .with_file_name("plugins")
@@ -1111,16 +1113,49 @@ pub fn plugin_kv_set(plugin_id: String, key: String, value: Value) -> Result<(),
     )
 }
 
-/// 当前启用版本的 main.js 绝对路径(asset 协议注入用);i18n 型/未安装返回 null
+/// 插件包内文件大小上限 2MB(main.js 与语言包 JSON 均为小文本;与插件包同限)
+const MAX_ENTRY_BYTES: usize = 2 * 1024 * 1024;
+
+/// 读取当前版本目录下相对路径文件内容(pv-1 内联注入用:宿主取 main.js 源码
+/// 包进 IIFE 执行,语言包插件取 <语言码>.json;不再暴露文件路径走 asset 协议)。
+/// rel_path 过 safe_rel_path(穿越/绝对路径/NUL 拒绝);文件缺失返回 None;
+/// 非 UTF-8 或超过 2MB 返回可读错误。root 可注入,命令外壳与单测共用。
+fn read_entry(
+    root: &PluginRoot,
+    plugin_id: &str,
+    rel_path: &str,
+) -> Result<Option<String>, String> {
+    ensure_plugin_id(plugin_id)?;
+    let Some(dir) = root.resolve_version_dir(plugin_id) else {
+        return Ok(None);
+    };
+    let Some(rel) = safe_rel_path(rel_path) else {
+        return Err(format!(
+            "插件文件路径不合法:{rel_path}(拒绝绝对路径与目录穿越)"
+        ));
+    };
+    let path = dir.join(rel);
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return Ok(None); // 文件缺失由调用方决定语义(如语言包码缺文件 → 跳过)
+    };
+    if !meta.is_file() {
+        return Ok(None);
+    }
+    if meta.len() as usize > MAX_ENTRY_BYTES {
+        return Err(format!("插件文件过大(上限 {MAX_ENTRY_BYTES} 字节):{rel_path}"));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取插件文件失败:{e}"))?;
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| format!("插件文件不是有效的 UTF-8 文本:{rel_path}"))
+}
+
 #[tauri::command]
-pub fn plugin_entry_path(plugin_id: String) -> Result<Option<String>, String> {
-    ensure_plugin_id(&plugin_id)?;
-    let root = PluginRoot::discover();
-    let path = root
-        .resolve_version_dir(&plugin_id)
-        .map(|dir| dir.join("main.js"))
-        .filter(|p| p.is_file());
-    Ok(path.map(|p| p.to_string_lossy().into_owned()))
+pub fn plugin_read_entry(
+    plugin_id: String,
+    rel_path: String,
+) -> Result<Option<String>, String> {
+    read_entry(&PluginRoot::discover(), &plugin_id, &rel_path)
 }
 
 /// 已安装插件包内 manifest.json 内容(宿主展示名称/ui 形态/错误恢复用)
@@ -1852,6 +1887,97 @@ mod tests {
         for ok in ["a", "demo-hello", "token-monitor", "a1-b2-c3"] {
             assert!(ensure_plugin_id(ok).is_ok(), "「{ok}」应放行");
         }
+    }
+
+    /* ---- 包内文件读取(plugin_read_entry,pv-1 内联注入通道) ---- */
+
+    /// 预置一个已安装插件:main.js + assets/a.json,返回临时根目录
+    fn setup_installed(root: &PluginRoot) {
+        let zip_bytes = make_zip(
+            &[
+                ("manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("main.js", b"pv.panel.register({});"),
+                ("assets/a.json", b"{}"),
+            ],
+            &[],
+        );
+        install_from_bytes(
+            root,
+            &zip_bytes,
+            &sha_of(&zip_bytes),
+            "release",
+            "demo-hello",
+            "1.0.0",
+            "0.1.9-alpha.2",
+            None,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn read_entry_reads_files_from_current_version() {
+        let root = temp_root("read-entry-ok");
+        setup_installed(&root);
+        assert_eq!(
+            read_entry(&root, "demo-hello", "main.js").unwrap(),
+            Some("pv.panel.register({});".to_string())
+        );
+        assert_eq!(
+            read_entry(&root, "demo-hello", "assets/a.json").unwrap(),
+            Some("{}".to_string())
+        );
+    }
+
+    #[test]
+    fn read_entry_rejects_traversal_and_bad_paths() {
+        let root = temp_root("read-entry-traversal");
+        setup_installed(&root);
+        for bad in ["../evil.txt", "/abs.txt", "C:/x.txt", "a\0b", ".."] {
+            let err = read_entry(&root, "demo-hello", bad).unwrap_err();
+            assert!(err.contains("不合法"), "「{bad}」应报路径不合法:{err}");
+        }
+        // 穿越 payload 即使被拒绝也不应落到 store 之外
+        assert!(!root.0.join("evil.txt").exists());
+    }
+
+    #[test]
+    fn read_entry_missing_returns_none() {
+        let root = temp_root("read-entry-missing");
+        // 未安装的插件:None
+        assert_eq!(read_entry(&root, "demo-hello", "main.js").unwrap(), None);
+        // 已安装但文件缺失:None(语言包缺 <码>.json 时由调用方跳过)
+        setup_installed(&root);
+        assert_eq!(read_entry(&root, "demo-hello", "assets/missing.json").unwrap(), None);
+        assert_eq!(read_entry(&root, "no-such", "main.js").unwrap(), None);
+        // 非法 id:Err(不静默)
+        assert!(read_entry(&root, "../evil", "main.js").is_err());
+    }
+
+    #[test]
+    fn read_entry_rejects_oversized_file() {
+        let root = temp_root("read-entry-oversize");
+        setup_installed(&root);
+        let big_path = root.store_dir("demo-hello").join("1.0.0").join("big.js");
+        let mut f = std::fs::File::create(&big_path).unwrap();
+        for _ in 0..(MAX_ENTRY_BYTES / 4096 + 1) {
+            f.write_all(&[b'x'; 4096]).unwrap();
+        }
+        drop(f);
+        let err = read_entry(&root, "demo-hello", "big.js").unwrap_err();
+        assert!(err.contains("过大"), "超限应报可读错误:{err}");
+    }
+
+    #[test]
+    fn read_entry_rejects_invalid_utf8() {
+        let root = temp_root("read-entry-utf8");
+        setup_installed(&root);
+        let path = root
+            .store_dir("demo-hello")
+            .join("1.0.0")
+            .join("binary.js");
+        std::fs::write(&path, [0xC0, 0xC1, 0xF5, 0xFF, 0xFE]).unwrap();
+        let err = read_entry(&root, "demo-hello", "binary.js").unwrap_err();
+        assert!(err.contains("UTF-8"), "非法 UTF-8 应报可读错误:{err}");
     }
 
     /* ---- 契约样例(三方共用,写端断言) ---- */
