@@ -34,6 +34,7 @@ import {
   serializeDataFile,
 } from "./util";
 import { applyTheme, currentTheme } from "./theme";
+import { useI18n } from "./i18n";
 import { windowLabel } from "./window";
 import Sidebar from "./components/Sidebar";
 import DetailPane from "./components/DetailPane";
@@ -162,6 +163,7 @@ function LoadErrorScreen({
 }
 
 export default function App() {
+  const { t } = useI18n();
   const [ready, setReady] = useState(false);
   const [setupFailed, setSetupFailed] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -253,8 +255,9 @@ export default function App() {
     () => ({
       showToast,
       onCommandsChanged: refreshPluginCommands,
+      t,
     }),
-    [showToast, refreshPluginCommands],
+    [showToast, refreshPluginCommands, t],
   );
 
   // 插件宿主:主窗口就绪后按 plugins.json enabled 顺序注入(失败隔离)

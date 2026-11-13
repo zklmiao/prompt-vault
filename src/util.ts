@@ -1,5 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { PromptItem } from "./types";
+import { currentLocale } from "./i18n/core.ts";
 
 /**
  * 输入法组字期间的按键判定:组字中的 Enter/Esc/方向键等必须让给输入法,
@@ -21,7 +22,8 @@ export function formatDate(iso: string | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("zh-CN", { hour12: false });
+  // locale 随界面语言(i18n 运行时提供读取函数,避免循环依赖)
+  return d.toLocaleString(currentLocale(), { hour12: false });
 }
 
 /**

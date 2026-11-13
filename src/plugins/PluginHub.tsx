@@ -22,6 +22,7 @@ import {
 } from "./api";
 import { injectAfterEnable, loadPluginsState, savePluginsState } from "./host";
 import type { HostHooks } from "./host";
+import { useI18n } from "../i18n";
 import { getPanel, getWindowSetup, registeredPanels } from "./registry";
 import { isNewerVersion } from "./semver";
 import type {
@@ -96,6 +97,7 @@ export default function PluginHub({
   onModalOpenChange,
   onCommandsChanged,
 }: Props) {
+  const { t } = useI18n();
   const [state, setState] = useState<PluginsState | null>(null);
   const [manifests, setManifests] = useState<Record<string, PluginManifest | null>>({});
   const [market, setMarket] = useState<SourceManifest | null>(null);
@@ -116,8 +118,8 @@ export default function PluginHub({
   const [marketForSource, setMarketForSource] = useState<string | null>(null);
 
   const hooks = useMemo<HostHooks>(
-    () => ({ showToast, onCommandsChanged }),
-    [showToast, onCommandsChanged],
+    () => ({ showToast, onCommandsChanged, t }),
+    [showToast, onCommandsChanged, t],
   );
 
   const refreshManifests = useCallback(async (st: PluginsState) => {

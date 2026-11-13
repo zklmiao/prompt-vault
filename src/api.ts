@@ -90,3 +90,19 @@ export const copyToClipboard = (text: string): Promise<void> =>
   writeText(text);
 
 export const readClipboard = (): Promise<string | null> => readText();
+
+// ---- i18n 手动语言包目录(%APPDATA%\prompt-vault\locales)----
+
+export interface LocaleEntry {
+  code: string;
+  fileName: string;
+  /** 非 null 表示文件内容校验失败,前端跳过该条 */
+  error?: string | null;
+}
+
+/** 扫描 locales 目录(目录不存在返回空数组) */
+export const i18nLocales = (): Promise<LocaleEntry[]> => invoke("i18n_locales");
+
+/** 读取指定语言码的语言包文件;缺失返回 null */
+export const i18nLocaleFile = (code: string): Promise<string | null> =>
+  invoke("i18n_locale_file", { code });

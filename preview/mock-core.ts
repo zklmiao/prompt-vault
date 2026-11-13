@@ -191,6 +191,17 @@ const MOCK_MANIFESTS: Record<string, Record<string, unknown>> = {
     ui: "panel",
     permissions: [],
   },
+  "demo-i18n": {
+    id: "demo-i18n",
+    name: "双语语言包(预览)",
+    version: "1.0.0",
+    minAppVersion: "0.1.0",
+    type: "i18n",
+    ui: "none",
+    permissions: [],
+    // 含一个非法码("bad code!"):宿主应跳过并 console.warn,不影响合法码
+    languages: ["en", "zh-CN", "bad code!"],
+  },
 };
 
 /**
@@ -234,6 +245,16 @@ pv.panel.register({
   }
 });
 `,
+  },
+  "demo-i18n": {
+    // 语言包为纯数据:无 main.js,只有 <语言码>.json(宿主启动消费,不注入脚本)
+    "en.json": JSON.stringify({
+      "toast.copied": "Copied to clipboard (pack)",
+      "ph.tabMarket": "Market (pack)",
+    }),
+    "zh-CN.json": JSON.stringify({
+      "toast.copied": "已复制到剪贴板(语言包)",
+    }),
   },
 };
 
@@ -283,6 +304,19 @@ const MOCK_MARKET: {
         version: "1.0.0",
         url: "https://mock.local/demo-clock-1.0.0.zip",
         sha256: "cc".repeat(32),
+      },
+      beta: null,
+      minAppVersion: "0.1.0",
+      permissions: [],
+    },
+    {
+      id: "demo-i18n",
+      name: "双语语言包",
+      desc: "type:i18n 假语言包,提供 en/zh-CN 两码(含非法码演示跳过)",
+      release: {
+        version: "1.0.0",
+        url: "https://mock.local/demo-i18n-1.0.0.zip",
+        sha256: "dd".repeat(32),
       },
       beta: null,
       minAppVersion: "0.1.0",
@@ -427,7 +461,29 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     case "plugin_net_fetch":
       console.log("[mock] plugin_net_fetch", args?.pluginId, args?.url);
       return { status: 200, body: "{}" };
+    /* ---- i18n 手动语言包目录 mock:localStorage "pv-mock-locales" =
+       Record<语言码, 目录> 即模拟 locales\<码>.json 文件 ---- */
+    case "i18n_locales": {
+      const dir = loadMockLocales();
+      return Object.keys(dir)
+        .sort()
+        .map((code) => ({ code, fileName: `${code}.json`, error: null }));
+    }
+    case "i18n_locale_file": {
+      const dir = loadMockLocales();
+      const catalog = dir[String(args?.code ?? "")];
+      return catalog ? JSON.stringify(catalog) : null;
+    }
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
+  }
+}
+
+function loadMockLocales(): Record<string, Record<string, string>> {
+  try {
+    const raw = localStorage.getItem("pv-mock-locales");
+    return raw ? (JSON.parse(raw) as Record<string, Record<string, string>>) : {};
+  } catch {
+    return {};
   }
 }

@@ -87,6 +87,11 @@ export function registerI18n(pluginId: string, dict: unknown): void {
   i18nDicts.set(pluginId, dict);
 }
 
+/** 注入完成后读取插件注册的语言字典(键 = 语言码;宿主并入 i18n 目录链) */
+export function getI18nDict(pluginId: string): unknown | undefined {
+  return i18nDicts.get(pluginId);
+}
+
 /** 宿主事件总线:插件间解耦通信(仅主窗口 webview 内有效) */
 export function onEvent(name: string, cb: (payload: unknown) => void): () => void {
   let set = eventBus.get(name);

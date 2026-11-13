@@ -59,6 +59,8 @@ export interface PluginManifest {
   type: "standard" | "i18n";
   ui: "panel" | "window" | "none";
   permissions?: string[];
+  /** i18n 型语言包声明提供的语言码(批次2消费;非法码由宿主跳过) */
+  languages?: string[];
 }
 
 /** pv.net.fetch 选项(pv-0;与 net.rs NetFetchOpts 对应) */
