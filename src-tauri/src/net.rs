@@ -30,7 +30,6 @@ const SSRF_REJECT_MSG: &str = "目标地址被 SSRF 防护拒绝:私网、环回
 const PERM_NET_MSG: &str = "插件未声明该网络权限";
 const PERM_CRED_MSG: &str = "插件未声明该凭据权限";
 /// 火山 V4 签名固定参数(规格:service "ark"、region "cn-beijing")
-const VOLC_REGION: &str = "cn-beijing";
 const VOLC_SERVICE: &str = "ark";
 
 #[derive(serde::Deserialize, Default)]
@@ -319,6 +318,18 @@ fn now_xdate() -> String {
 /// 火山方舟 V4 HMAC-SHA256 签名链(service=ark、region=cn-beijing、签名头 host;x-date、
 /// 空载荷哈希)。返回 (X-Date, Authorization) 两个头的值。
 /// xdate 由调用方传入以便单测固定向量;单测期望值由 node crypto 独立计算(见测试注释)。
+/// 火山方舟 V4 签名 region:按请求 host 推导 —— 国内(默认)cn-beijing;
+/// 国际站(BytePlus,host 含 bytepluses)ap-southeast。
+/// 注意:国际 region 取值按 BytePlus 公开签名约定实现,未经真实凭据实测(灰区),
+/// 若国际端点校验拒绝,优先核对此处取值。
+fn volc_region_for_host(host: &str) -> &'static str {
+    if host.contains("bytepluses") {
+        "ap-southeast"
+    } else {
+        "cn-beijing"
+    }
+}
+
 fn volcengine_sign(
     ak: &str,
     sk: &str,
@@ -327,6 +338,7 @@ fn volcengine_sign(
     xdate: &str,
 ) -> Result<(String, String), String> {
     let host = url.host_str().ok_or("URL 缺少主机名")?.to_lowercase();
+    let region = volc_region_for_host(&host);
     let canonical_query = volc_canonical_query(url);
     // 规范化请求:方法 \n 路径 \n 查询 \n 规范化头(每行尾随 \n,再补一个空行)
     // \n 签名头列表 \n 载荷哈希(GET 无 body,取空串 SHA-256)
@@ -340,14 +352,14 @@ fn volcengine_sign(
         sha256_hex(b"")
     );
     let date = xdate.get(..8).ok_or("X-Date 格式不正确")?;
-    let scope = format!("{date}/{VOLC_REGION}/{VOLC_SERVICE}/request");
+    let scope = format!("{date}/{region}/{VOLC_SERVICE}/request");
     let string_to_sign = format!(
         "HMAC-SHA256\n{xdate}\n{scope}\n{}",
         sha256_hex(canonical_request.as_bytes())
     );
     // 派生密钥链:kDate → kRegion → kService → kSigning("request")
     let k_date = hmac_sha256(sk.as_bytes(), date.as_bytes());
-    let k_region = hmac_sha256(&k_date, VOLC_REGION.as_bytes());
+    let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, VOLC_SERVICE.as_bytes());
     let k_signing = hmac_sha256(&k_service, b"request");
     let signature = hex_encode(&hmac_sha256(&k_signing, string_to_sign.as_bytes()));
@@ -853,6 +865,28 @@ mod tests {
             "HMAC-SHA256 Credential=test-ak-1234/20261113/cn-beijing/ark/request, \
              SignedHeaders=host;x-date, \
              Signature=4794263ce553faa051b166eb4e4b01fd98c357cd3e97ec3b6eca026ce5c7aea1"
+        );
+    }
+
+    /// 国际站 host(BytePlus)→ region 推导 ap-southeast,签名 scope 随之切换;
+    /// 国内 host 保持 cn-beijing(固定向量已单独覆盖)
+    #[test]
+    fn volc_region_derives_from_host() {
+        assert_eq!(volc_region_for_host("ark.cn-beijing.volcengineapi.com"), "cn-beijing");
+        assert_eq!(
+            volc_region_for_host("ark.ap-southeast.bytepluses.com"),
+            "ap-southeast"
+        );
+        let url = validate_url(
+            "https://ark.ap-southeast.bytepluses.com/?Action=GetAFPUsage&Version=2024-01-01",
+        )
+        .unwrap();
+        let (_, authorization) =
+            volcengine_sign("test-ak-1234", "test-sk-5678", "GET", &url, "20261113T080000Z")
+                .unwrap();
+        assert!(
+            authorization.contains("/20261113/ap-southeast/ark/request"),
+            "国际 host 的签名 scope 应为 ap-southeast:{authorization}"
         );
     }
 

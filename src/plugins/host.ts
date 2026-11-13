@@ -4,7 +4,7 @@
 // (window.__pvSlot) 内联注入(同步执行);单插件注入后 3s 内未注册即标记
 // error 并 toast,失败隔离,不影响其他插件与主窗口。
 
-import { pluginInstalledManifest, pluginReadEntry, kvGet, pluginOpenWindow, readPluginsState, writePluginsState } from "./api";
+import { pluginInstalledManifest, pluginReadEntry, kvGet, kvSet, pluginOpenWindow, readPluginsState, writePluginsState } from "./api";
 import { createBridge } from "./bridge";
 import {
   getI18nDict,
@@ -341,6 +341,11 @@ async function openWindowPlugin(id: string, always: boolean): Promise<void> {
   await pluginOpenWindow(id, size, pos).catch((e) => {
     console.warn(`[pv] 打开插件窗口失败(${id}):`, e);
   });
+  // 即插即用路径恢复常驻:用户显式打开 = 期望下次启动仍自动弹(矩阵自洽,
+  // 否则「隐藏后从主窗唤出」的窗口下次重启又不弹,用户会困惑)
+  if (always) {
+    await kvSet(id, "window:visible", true).catch(() => {});
+  }
 }
 
 /* ---------- 命令面板桥接 ---------- */

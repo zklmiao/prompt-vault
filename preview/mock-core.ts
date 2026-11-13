@@ -216,7 +216,9 @@ const MOCK_MANIFESTS: Record<string, Record<string, unknown>> = {
     ui: "window",
     permissions: [
       "net:open.bigmodel.cn",
+      "net:api.z.ai",
       "net:ark.cn-beijing.volcengineapi.com",
+      "net:ark.ap-southeast.bytepluses.com",
       "net:opencode.ai",
       "credential:glm",
       "credential:volcengine",
@@ -388,7 +390,9 @@ const MOCK_MARKET: {
       minAppVersion: "0.2.0",
       permissions: [
         "net:open.bigmodel.cn",
+        "net:api.z.ai",
         "net:ark.cn-beijing.volcengineapi.com",
+        "net:ark.ap-southeast.bytepluses.com",
         "net:opencode.ai",
         "credential:glm",
         "credential:volcengine",

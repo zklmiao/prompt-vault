@@ -36,9 +36,13 @@
 
   // ============ 常量:三家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
 
-  var GLM_BASE = 'https://open.bigmodel.cn';
-  var VOLC_URL = 'https://ark.cn-beijing.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01';
+  var GLM_BASE = 'https://open.bigmodel.cn';        // 国内版
+  var GLM_BASE_GLOBAL = 'https://api.z.ai';          // 国际版(kv ball.glmGlobal = true 时启用)
+  var VOLC_HOST = 'https://ark.cn-beijing.volcengineapi.com';   // 国内版
+  var VOLC_HOST_GLOBAL = 'https://ark.ap-southeast.bytepluses.com'; // 国际版(kv ball.volcGlobal)
   var OPENCODE_URL = 'https://opencode.ai/zen/go/v1/usage';
+  var KV_GLM_GLOBAL = 'ball.glmGlobal';              // GLM 国际版开关(bool,默认国内)
+  var KV_VOLC_GLOBAL = 'ball.volcGlobal';            // 火山国际版开关(bool,默认国内)
 
   /** 供应商元信息:label 供详情面板,abbr 供圆球中心缩写(设计 §5.1:GLM / ARK / OC) */
   var PROVIDERS = {
@@ -236,45 +240,55 @@
     });
   }
 
-  /** GLM:quota/limit(套餐窗口 + MCP 月度)+ model-usage(近 24h 聚合),mode raw */
+  /** GLM:quota/limit(套餐窗口 + MCP 月度)+ model-usage(近 24h 聚合),mode raw。
+   *  base 现读 kv(ball.glmGlobal):国际版 https://api.z.ai,国内 open.bigmodel.cn;
+   *  面板/球两实例都现读,切换开关后下一次取数即用新 base */
   function fetchGlm() {
-    var quotaPromise = callNet(GLM_BASE + '/api/monitor/usage/quota/limit', {
-      authFrom: 'credential:glm',
-      mode: 'raw'
-    }).then(parseJson).then(parseGlmQuota);
-    // 时间参数格式 yyyy-MM-dd HH:mm:ss,URL 编码后拼 query
-    var range = glmDayRange(new Date());
-    var usageQuery =
-      '?startTime=' + encodeURIComponent(range.startTime) +
-      '&endTime=' + encodeURIComponent(range.endTime);
-    var usagePromise = callNet(GLM_BASE + '/api/monitor/usage/model-usage' + usageQuery, {
-      authFrom: 'credential:glm',
-      mode: 'raw'
-    }).then(parseJson).then(parseGlmModelUsage);
-    return Promise.all([quotaPromise, usagePromise]).then(function (results) {
-      var quota = results[0];
-      var tokens = results[1];
-      return {
-        provider: 'glm',
-        fiveHour: quota.fiveHour,
-        weekly: quota.weekly,
-        mcpMonthly: quota.mcpMonthly,
-        tokens24h: tokens.tokens24h
-      };
+    return pv.storage.get(KV_GLM_GLOBAL).then(function (isGlobal) {
+      var base = isGlobal === true ? GLM_BASE_GLOBAL : GLM_BASE;
+      var quotaPromise = callNet(base + '/api/monitor/usage/quota/limit', {
+        authFrom: 'credential:glm',
+        mode: 'raw'
+      }).then(parseJson).then(parseGlmQuota);
+      // 时间参数格式 yyyy-MM-dd HH:mm:ss,URL 编码后拼 query
+      var range = glmDayRange(new Date());
+      var usageQuery =
+        '?startTime=' + encodeURIComponent(range.startTime) +
+        '&endTime=' + encodeURIComponent(range.endTime);
+      var usagePromise = callNet(base + '/api/monitor/usage/model-usage' + usageQuery, {
+        authFrom: 'credential:glm',
+        mode: 'raw'
+      }).then(parseJson).then(parseGlmModelUsage);
+      return Promise.all([quotaPromise, usagePromise]).then(function (results) {
+        var quota = results[0];
+        var tokens = results[1];
+        return {
+          provider: 'glm',
+          fiveHour: quota.fiveHour,
+          weekly: quota.weekly,
+          mcpMonthly: quota.mcpMonthly,
+          tokens24h: tokens.tokens24h
+        };
+      });
     });
   }
 
-  /** 火山:GetAFPUsage,mode volcengine(V4 签名双头 X-Date/Authorization 在 Rust 内完成) */
+  /** 火山:GetAFPUsage,mode volcengine(V4 签名双头 X-Date/Authorization 在 Rust 内完成)。
+   *  host 现读 kv(ball.volcGlobal):国内 ark.cn-beijing.volcengineapi.com,
+   *  国际 ark.ap-southeast.bytepluses.com;Rust 签名 region 随 host 推导 */
   function fetchVolcengine() {
-    return callNet(VOLC_URL, {
-      authFrom: 'credential:volcengine',
-      mode: 'volcengine'
-    })
-      .then(parseJson)
-      .then(function (payload) {
-        var usage = parseVolcUsage(payload);
-        return { provider: 'volcengine', fiveHour: usage.fiveHour, weekly: usage.weekly };
-      });
+    return pv.storage.get(KV_VOLC_GLOBAL).then(function (isGlobal) {
+      var host = isGlobal === true ? VOLC_HOST_GLOBAL : VOLC_HOST;
+      return callNet(host + '/?Action=GetAFPUsage&Version=2024-01-01', {
+        authFrom: 'credential:volcengine',
+        mode: 'volcengine'
+      })
+        .then(parseJson)
+        .then(function (payload) {
+          var usage = parseVolcUsage(payload);
+          return { provider: 'volcengine', fiveHour: usage.fiveHour, weekly: usage.weekly };
+        });
+    });
   }
 
   /** OpenCode:zen/go/v1/usage,mode bearer */
@@ -363,7 +377,11 @@
       credSavedToast: 'Key 已录入(仅存凭据管理器)',
       credDeletedToast: 'Key 已删除',
       credFail: '凭据操作失败:',
-      errPrefix: '取数失败:'
+      errPrefix: '取数失败:',
+      glmGlobal: '国际版 (api.z.ai)',
+      glmGlobalTitle: 'Key 来自智谱国际版时勾选(端点切换为 api.z.ai)',
+      volcGlobal: '国际版 (bytepluses.com)',
+      volcGlobalTitle: 'AK/SK 来自火山引擎国际站时勾选(端点切换为 bytepluses.com)'
     },
     en: {
       panelTitle: 'Usage Monitor',
@@ -389,7 +407,11 @@
       credSavedToast: 'Key saved (credential manager only)',
       credDeletedToast: 'Key removed',
       credFail: 'Credential operation failed: ',
-      errPrefix: 'Fetch failed: '
+      errPrefix: 'Fetch failed: ',
+      glmGlobal: 'Global (api.z.ai)',
+      glmGlobalTitle: 'Check if the key is from Z.ai global (endpoint api.z.ai)',
+      volcGlobal: 'Global (bytepluses.com)',
+      volcGlobalTitle: 'Check if AK/SK is from Volcengine global (endpoint bytepluses.com)'
     }
   };
 
@@ -829,6 +851,32 @@
           row.appendChild(status);
           settings.appendChild(row);
 
+          // 国际版开关(GLM:api.z.ai;火山:bytepluses.com;存 kv,取数现读)
+          var globalKv = p === 'glm' ? KV_GLM_GLOBAL : (p === 'volcengine' ? KV_VOLC_GLOBAL : null);
+          if (globalKv) {
+            var gRow = tmEl('div', 'pv-tm-set-row');
+            gRow.appendChild(tmEl('span', 'pv-tm-set-label', ''));
+            var gCheck = document.createElement('input');
+            gCheck.type = 'checkbox';
+            gCheck.title = tm('glmGlobalTitle');
+            gRow.appendChild(gCheck);
+            gRow.appendChild(tmEl('span', 'pv-tm-muted', tm(p === 'glm' ? 'glmGlobal' : 'volcGlobal')));
+            settings.appendChild(gRow);
+            pv.storage.get(globalKv).then(function (v) {
+              gCheck.checked = v === true;
+            }).catch(function () { /* 默认国内 */ });
+            gCheck.addEventListener('change', function () {
+              void pv.storage.set(globalKv, gCheck.checked === true).catch(function () {});
+              // 切换 base 后立即重取该家(未录入 Key 时仅落盘,数据随录入即刷)
+              fetchAndCache(p).then(function () {
+                renderPanelCards();
+              }).catch(function (err) {
+                panelErrors[p] = (err && err.message) || String(err);
+                renderPanelCards();
+              });
+            });
+          }
+
           var refreshStatus = function (configuredList) {
             var has = configuredList.indexOf(p) >= 0;
             status.textContent = has ? tm('configured') : tm('notConfigured');
@@ -845,6 +893,13 @@
               return pv.credentials.configured().then(function (list) {
                 refreshStatus(list);
                 renderPanelCards();
+                // 录入即刷:成功后立即拉取该家数据并写 cache(失败错误落卡片,不清缓存)
+                fetchAndCache(p).then(function () {
+                  renderPanelCards();
+                }).catch(function (err) {
+                  panelErrors[p] = (err && err.message) || String(err);
+                  renderPanelCards();
+                });
               });
             }).catch(function (err) {
               status.textContent = tm('credFail') + ((err && err.message) || String(err));

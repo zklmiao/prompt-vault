@@ -7,7 +7,9 @@
   "ui": "window",
   "permissions": [
     "net:open.bigmodel.cn",
+    "net:api.z.ai",
     "net:ark.cn-beijing.volcengineapi.com",
+    "net:ark.ap-southeast.bytepluses.com",
     "net:opencode.ai",
     "credential:glm",
     "credential:volcengine",
