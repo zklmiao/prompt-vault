@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { isComposingEvent } from "../util";
+import { useI18n } from "../i18n";
 
 interface Props {
   value: string[];
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default function TagInput({ value, onChange, suggestions }: Props) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
 
@@ -27,14 +29,14 @@ export default function TagInput({ value, onChange, suggestions }: Props) {
   return (
     <div className="tag-input">
       <div className="tag-box">
-        {value.map((t) => (
-          <span key={t} className="chip removable">
-            #{t}
+        {value.map((tag) => (
+          <span key={tag} className="chip removable">
+            #{tag}
             <button
               type="button"
               className="chip-x"
-              onClick={() => onChange(value.filter((x) => x !== t))}
-              title="移除标签"
+              onClick={() => onChange(value.filter((x) => x !== tag))}
+              title={t("tag.removeTitle")}
             >
               ×
             </button>
@@ -58,7 +60,7 @@ export default function TagInput({ value, onChange, suggestions }: Props) {
               onChange(value.slice(0, -1));
             }
           }}
-          placeholder={value.length === 0 ? "输入标签,回车确认" : ""}
+          placeholder={value.length === 0 ? t("tag.placeholder") : ""}
         />
       </div>
       {focused && candidates.length > 0 && (

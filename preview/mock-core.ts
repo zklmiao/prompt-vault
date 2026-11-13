@@ -250,10 +250,12 @@ pv.panel.register({
     // 语言包为纯数据:无 main.js,只有 <语言码>.json(宿主启动消费,不注入脚本)
     "en.json": JSON.stringify({
       "toast.copied": "Copied to clipboard (pack)",
+      "toast.copiedFilled": "Copied to clipboard (pack, variables filled)",
       "ph.tabMarket": "Market (pack)",
     }),
     "zh-CN.json": JSON.stringify({
       "toast.copied": "已复制到剪贴板(语言包)",
+      "toast.copiedFilled": "已复制到剪贴板(语言包,变量已填充)",
     }),
   },
 };

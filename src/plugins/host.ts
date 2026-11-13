@@ -17,6 +17,7 @@ import {
   pushPluginDicts,
   resetPluginCatalogs,
   setI18nPacks,
+  translate,
 } from "../i18n";
 import type { PluginPaletteCommand } from "./palette";
 import type { InstalledEntry, PluginsState, SourceConfig } from "./types";
@@ -54,7 +55,8 @@ function coerceEntry(raw: unknown): InstalledEntry | null {
 
 export function coercePluginsState(raw: string): PluginsState {
   const v: unknown = JSON.parse(raw);
-  if (typeof v !== "object" || v === null) throw new Error("plugins.json 结构不正确");
+  if (typeof v !== "object" || v === null)
+    throw new Error(translate("host.errBadStateJson"));
   const obj = v as Record<string, unknown>;
   const installed: Record<string, InstalledEntry> = {};
   if (typeof obj.installed === "object" && obj.installed !== null) {
@@ -207,7 +209,7 @@ export async function injectOne(pluginId: string): Promise<void> {
   }
   const source = await pluginReadEntry(pluginId, "main.js").catch(() => null);
   if (source === null || source.trim() === "") {
-    throw new Error("未找到当前版本的 main.js(插件文件缺失)");
+    throw new Error(translate("host.errNoEntry"));
   }
   const syncErrors: string[] = [];
   const onError = (ev: ErrorEvent) => {
@@ -224,12 +226,12 @@ export async function injectOne(pluginId: string): Promise<void> {
     window.removeEventListener("error", onError);
   }
   if (syncErrors.length > 0) {
-    throw new Error(`插件脚本执行出错:${syncErrors[0]}`);
+    throw new Error(translate("host.errScript", { msg: syncErrors[0] }));
   }
   if (!hasRegistered(pluginId)) {
     const ok = await waitForRegistration(pluginId);
     if (!ok) {
-      throw new Error("加载超时:插件 3 秒内未调用任何 pv.* 注册");
+      throw new Error(translate("host.errTimeout"));
     }
   }
   // 注入完成序:插件自带的 pv.i18n 字典并入 i18n 插件层(无字典则无操作)

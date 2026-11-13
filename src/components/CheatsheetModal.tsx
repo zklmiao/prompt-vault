@@ -1,5 +1,6 @@
 import Modal from "./Modal";
 import { formatHotkey } from "../util";
+import { useI18n } from "../i18n";
 import type { Hotkeys } from "../api";
 
 interface Props {
@@ -19,55 +20,56 @@ interface Group {
 
 /** 快捷键速查表:内容必须与真实行为一致;全局热键动态读取配置 */
 export default function CheatsheetModal({ hotkeys, onClose }: Props) {
+  const { t } = useI18n();
   const groups: Group[] = [
     {
-      title: "全局",
+      title: t("cheat.groupGlobal"),
       rows: [
         {
           keys: [formatHotkey(hotkeys.quickpick)],
-          desc: "唤出 / 收起快速拾取面板",
+          desc: t("cheat.quickpickDesc"),
         },
         {
           keys: [formatHotkey(hotkeys.clipboard_new)],
-          desc: "把剪贴板内容存为新收藏",
+          desc: t("cheat.clipboardNewDesc"),
         },
       ],
     },
     {
-      title: "窗口",
+      title: t("cheat.groupWindow"),
       rows: [
-        { keys: ["Ctrl+N"], desc: "新建 prompt" },
-        { keys: ["Ctrl+F"], desc: "聚焦搜索框" },
-        { keys: ["Ctrl+K"], desc: "打开 / 关闭命令面板" },
-        { keys: ["Ctrl+Enter"], desc: "保存编辑" },
-        { keys: ["?"], desc: "打开 / 关闭本速查表" },
+        { keys: ["Ctrl+N"], desc: t("cheat.newDesc") },
+        { keys: ["Ctrl+F"], desc: t("cheat.focusSearch") },
+        { keys: ["Ctrl+K"], desc: t("cheat.paletteDesc") },
+        { keys: ["Ctrl+Enter"], desc: t("cheat.saveDesc") },
+        { keys: ["?"], desc: t("cheat.sheetToggle") },
       ],
     },
     {
-      title: "主列表",
+      title: t("cheat.groupList"),
       rows: [
-        { keys: ["↑", "↓"], desc: "选择上一条 / 下一条" },
-        { keys: ["Home", "End"], desc: "跳到第一条 / 最后一条" },
-        { keys: ["Enter"], desc: "复制选中项" },
-        { keys: ["Ctrl+E"], desc: "编辑选中项" },
-        { keys: ["Space"], desc: "勾选 / 取消勾选(多选)" },
-        { keys: ["Esc"], desc: "退出编辑 / 清除多选" },
+        { keys: ["↑", "↓"], desc: t("cheat.upDown") },
+        { keys: ["Home", "End"], desc: t("cheat.homeEnd") },
+        { keys: ["Enter"], desc: t("cheat.enterCopy") },
+        { keys: ["Ctrl+E"], desc: t("cheat.ctrlE") },
+        { keys: ["Space"], desc: t("cheat.space") },
+        { keys: ["Esc"], desc: t("cheat.escList") },
       ],
     },
     {
-      title: "编辑与列表",
+      title: t("cheat.groupEditorList"),
       rows: [
-        { keys: ["Enter"], desc: "标签输入框:确认并添加标签" },
-        { keys: ["Enter"], desc: "变量弹窗:在最后一个输入框直接复制" },
-        { keys: ["↑ ↓", "Enter", "Esc"], desc: "快速拾取:选择 / 复制 / 关闭" },
-        { keys: ["Ctrl+A"], desc: "全选当前列表(多选)" },
-        { keys: ["Esc"], desc: "清除多选 / 关闭弹窗" },
+        { keys: ["Enter"], desc: t("cheat.tagEnter") },
+        { keys: ["Enter"], desc: t("cheat.phEnter") },
+        { keys: ["↑ ↓", "Enter", "Esc"], desc: t("cheat.qpKeys") },
+        { keys: ["Ctrl+A"], desc: t("cheat.ctrlA") },
+        { keys: ["Esc"], desc: t("cheat.escModal") },
       ],
     },
   ];
 
   return (
-    <Modal title="键盘快捷键" onCancel={onClose}>
+    <Modal title={t("cheat.title")} onCancel={onClose}>
       <div className="cheat-sheet">
         {groups.map((group) => (
           <section key={group.title} className="cheat-group">
@@ -88,7 +90,7 @@ export default function CheatsheetModal({ hotkeys, onClose }: Props) {
           </section>
         ))}
         <p className="modal-hint" style={{ marginTop: 14 }}>
-          按 ? 或 Esc 关闭;全局热键可在设置中修改。
+          {t("cheat.footerHint")}
         </p>
       </div>
     </Modal>

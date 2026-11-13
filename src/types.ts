@@ -42,6 +42,8 @@ export interface NewPrefill {
   source?: string;
   tags?: string[];
   note?: string;
+  /** 来源判别(编辑器标题用):缺省 = 从剪贴板;判别走字段不走文案,语言切换安全 */
+  kind?: "drop" | "sample";
 }
 
 export interface Draft {

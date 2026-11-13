@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { winClose, winIsMaximized, winMinimize, winToggleMaximize } from "../api";
+import { useI18n } from "../i18n";
 import { IconMaximize, IconMinimize, IconRestore, IconX } from "./icons";
 
 /**
@@ -12,6 +13,7 @@ import { IconMaximize, IconMinimize, IconRestore, IconX } from "./icons";
  * 因此这里不要再手写 onDoubleClick,否则会与原生行为叠加成双重切换。
  */
 export default function TitleBar() {
+  const { t } = useI18n();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -68,7 +70,7 @@ export default function TitleBar() {
         <button
           type="button"
           className="titlebar-btn"
-          title="最小化"
+          title={t("titlebar.minimize")}
           onClick={() => void winMinimize()}
         >
           <IconMinimize size={15} />
@@ -76,7 +78,7 @@ export default function TitleBar() {
         <button
           type="button"
           className="titlebar-btn"
-          title={maximized ? "还原" : "最大化"}
+          title={maximized ? t("titlebar.restore") : t("titlebar.maximize")}
           onClick={() => void toggleMaximize()}
         >
           {maximized ? <IconRestore size={14} /> : <IconMaximize size={14} />}
@@ -84,7 +86,7 @@ export default function TitleBar() {
         <button
           type="button"
           className="titlebar-btn titlebar-close"
-          title="关闭到托盘"
+          title={t("titlebar.close")}
           onClick={() => void winClose()}
         >
           <IconX size={15} />

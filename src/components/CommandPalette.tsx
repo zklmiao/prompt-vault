@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fuzzyMatch, isComposingEvent } from "../util";
 import type { MatchRange } from "../util";
+import { useI18n } from "../i18n";
 import Highlight from "./Highlight";
 import { IconSearch } from "./icons";
 
@@ -29,7 +30,16 @@ interface Row {
   score: number;
 }
 
+/** 分组名是身份不是文案:GROUP_ORDER 与 cmd.group 保持中文值参与排序与分组 */
 const GROUP_ORDER = ["收藏", "视图", "应用", "插件"];
+
+/** 分组身份 → 展示文案键(仅渲染层翻译) */
+const GROUP_LABEL_KEYS: Record<string, string> = {
+  收藏: "palette.group.favorites",
+  视图: "palette.group.view",
+  应用: "palette.group.app",
+  插件: "palette.group.plugins",
+};
 
 function scoreCommand(
   query: string,
@@ -53,6 +63,7 @@ function scoreCommand(
 
 /** 应用内命令面板:模糊搜索 + 分组 + ↑↓/Enter/Esc 键盘操作 */
 export default function CommandPalette({ commands, onClose }: Props) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [idx, setIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -117,6 +128,12 @@ export default function CommandPalette({ commands, onClose }: Props) {
     return map;
   }, [rows]);
 
+  /** 展示层翻译分组名;未知分组(插件自定义)原样显示 */
+  const groupLabel = (name: string): string => {
+    const key = GROUP_LABEL_KEYS[name];
+    return key ? t(key) : name;
+  };
+
   const runCmd = (cmd: PaletteCommand) => {
     onClose();
     cmd.run();
@@ -146,13 +163,13 @@ export default function CommandPalette({ commands, onClose }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+      <div className="palette" role="dialog" aria-modal="true" aria-label={t("palette.ariaLabel")}>
         <div className="qp-input-row">
           <IconSearch size={17} className="qp-search-icon" />
           <input
             ref={inputRef}
             className="qp-input"
-            placeholder="搜索命令,↑↓ 选择,Enter 执行,Esc 关闭"
+            placeholder={t("palette.inputPlaceholder")}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -164,7 +181,7 @@ export default function CommandPalette({ commands, onClose }: Props) {
         <div className="palette-list">
           {groups.map((group) => (
             <div key={group.name} className="palette-group">
-              <div className="palette-group-title">{group.name}</div>
+              <div className="palette-group-title">{groupLabel(group.name)}</div>
               {group.rows.map((row) => {
                 const flatIndex = indexById.get(row.cmd.id) ?? 0;
                 const active = flatIndex === idx;
@@ -195,7 +212,7 @@ export default function CommandPalette({ commands, onClose }: Props) {
             </div>
           ))}
           {rows.length === 0 && (
-            <div className="palette-empty">没有匹配的命令</div>
+            <div className="palette-empty">{t("palette.empty")}</div>
           )}
         </div>
       </div>

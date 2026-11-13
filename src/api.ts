@@ -69,20 +69,27 @@ export const winClose = (): Promise<void> => invoke("win_close");
 
 const JSON_FILTERS = [{ name: "JSON", extensions: ["json"] }];
 
-export const chooseDataFileSave = (defaultPath: string): Promise<string | null> =>
+/** 原生对话框标题由调用方传入(随界面语言;api 层不依赖 React) */
+export const chooseDataFileSave = (
+  defaultPath: string,
+  title: string,
+): Promise<string | null> =>
   save({
-    title: "选择 Prompt 数据文件保存位置",
+    title,
     defaultPath,
     filters: JSON_FILTERS,
   });
 
-export const chooseExportFile = (defaultPath: string): Promise<string | null> =>
-  save({ title: "导出 Prompt 收藏", defaultPath, filters: JSON_FILTERS });
+export const chooseExportFile = (
+  defaultPath: string,
+  title: string,
+): Promise<string | null> =>
+  save({ title, defaultPath, filters: JSON_FILTERS });
 
-export const chooseImportFile = (): Promise<string | null> =>
+export const chooseImportFile = (title: string): Promise<string | null> =>
   open({
     multiple: false,
-    title: "导入 Prompt 收藏",
+    title,
     filters: JSON_FILTERS,
   });
 

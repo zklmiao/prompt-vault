@@ -1,5 +1,5 @@
 // 插件区(PluginHub):已安装 / 插件源 / 市场三段管理界面。
-// 全部中文文案;样式走 App.css 的 CSS token;图标用 icons.tsx 内联 SVG。
+// 样式走 App.css 的 CSS token;图标用 icons.tsx 内联 SVG;文案走 i18n(域 ph.*)。
 // 弹层(Modal/ConfirmModal)沿用既有组件与守卫模式。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -39,11 +39,6 @@ import type {
 type Section = "installed" | "sources" | "market" | `panel:${string}`;
 type Channel = "release" | "beta";
 
-const CHANNEL_LABELS: Record<Channel, string> = {
-  release: "正式版",
-  beta: "测试版",
-};
-
 /** 仓库主页地址解析:github/gitee/gitlab 按域名自动识别,其余按 gitea 处理(可手动纠正) */
 export function parseRepoHome(url: string): {
   provider: ProviderKind;
@@ -75,14 +70,6 @@ export function parseRepoHome(url: string): {
   } catch {
     return null;
   }
-}
-
-/** 权限串的中文说明(未知形状原样展示) */
-function permissionHint(p: string): string {
-  if (p === "window:float") return "创建桌面悬浮窗";
-  if (p.startsWith("net:")) return `联网请求(仅限 ${p.slice(4)})`;
-  if (p.startsWith("credential:")) return `使用已录入的 ${p.slice(11)} 凭据发起请求`;
-  return "其他权限";
 }
 
 interface Props {
@@ -122,6 +109,22 @@ export default function PluginHub({
     [showToast, onCommandsChanged, t],
   );
 
+  const channelLabel = useCallback(
+    (channel: Channel): string => t(channel === "release" ? "ph.channelRelease" : "ph.channelBeta"),
+    [t],
+  );
+
+  /** 权限串的中文说明(未知形状原样展示) */
+  const permissionHint = useCallback(
+    (p: string): string => {
+      if (p === "window:float") return t("ph.permFloat");
+      if (p.startsWith("net:")) return t("ph.permNet", { host: p.slice(4) });
+      if (p.startsWith("credential:")) return t("ph.permCredential", { scope: p.slice(11) });
+      return t("ph.permOther");
+    },
+    [t],
+  );
+
   const refreshManifests = useCallback(async (st: PluginsState) => {
     const ids = Object.keys(st.installed);
     const results = await Promise.all(
@@ -143,9 +146,9 @@ export default function PluginHub({
 
   useEffect(() => {
     reloadState().catch((e) =>
-      showToast(`插件状态读取失败:${String(e)}`, "err"),
+      showToast(t("ph.toastStateReadFailed", { msg: String(e) }), "err"),
     );
-  }, [reloadState, showToast]);
+  }, [reloadState, showToast, t]);
 
   // 弹层守卫上报(沿用 modalOpen 模式)
   useEffect(() => {
@@ -160,13 +163,13 @@ export default function PluginHub({
   const loadMarket = useCallback(async (source: SourceConfig | null) => {
     if (!source) {
       setMarket(null);
-      setMarketError("尚未激活插件源:请先在「插件源」中添加并激活一个源");
+      setMarketError(t("ph.noActiveSource"));
       return;
     }
     const parsed = parseRepoHome(source.url);
     if (!parsed) {
       setMarket(null);
-      setMarketError("插件源地址无法解析,应为仓库主页地址");
+      setMarketError(t("ph.badSourceUrl"));
       return;
     }
     setMarketLoading(true);
@@ -186,7 +189,7 @@ export default function PluginHub({
     } finally {
       setMarketLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const sid = state?.activeSourceId ?? null;
@@ -208,11 +211,11 @@ export default function PluginHub({
         setState(next);
         return next;
       } catch (e) {
-        showToast(`插件状态保存失败:${String(e)}`, "err");
+        showToast(t("ph.toastStateSaveFailed", { msg: String(e) }), "err");
         return null;
       }
     },
-    [state, showToast],
+    [state, showToast, t],
   );
 
   /* ---------- 已安装区动作 ---------- */
@@ -261,17 +264,22 @@ export default function PluginHub({
           await injectAfterEnable(marketEntry.id, hooks);
           // 注入失败时错误会写回 plugins.json,重读以反映错误态
           await reloadState();
-          showToast(`已安装 ${marketEntry.name} ${ref.version}`);
+          showToast(t("ph.toastInstalled", { name: marketEntry.name, version: ref.version }));
         } else {
-          showToast(`已安装 ${marketEntry.name} ${ref.version}(保持停用)`);
+          showToast(
+            t("ph.toastInstalledDisabled", { name: marketEntry.name, version: ref.version }),
+          );
         }
       } catch (e) {
-        showToast(`安装失败:${e instanceof Error ? e.message : String(e)}`, "err");
+        showToast(
+          t("ph.toastInstallFailed", { msg: e instanceof Error ? e.message : String(e) }),
+          "err",
+        );
       } finally {
         setBusy(false);
       }
     },
-    [hooks, reloadState, showToast],
+    [hooks, reloadState, showToast, t],
   );
 
   const doUninstall = useCallback(
@@ -280,24 +288,24 @@ export default function PluginHub({
       await pluginCloseWindow(id).catch(() => {});
       try {
         await uninstallPlugin(id);
-        showToast("已卸载插件");
+        showToast(t("ph.toastUninstalled"));
         // 注入的脚本无法在运行中卸载:落盘完成后 reload 重载宿主
         window.location.reload();
       } catch (e) {
-        showToast(`卸载失败:${String(e)}`, "err");
+        showToast(t("ph.toastUninstallFailed", { msg: String(e) }), "err");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const openPluginWindow = useCallback(
     (id: string) => {
       const size = getWindowSetup(id)?.size;
       pluginOpenWindow(id, size).catch((e) =>
-        showToast(`打开插件窗口失败:${String(e)}`, "err"),
+        showToast(t("ph.toastOpenWindowFailed", { msg: String(e) }), "err"),
       );
     },
-    [showToast],
+    [showToast, t],
   );
 
   /* ---------- 插件源动作 ---------- */
@@ -305,7 +313,7 @@ export default function PluginHub({
   const handleAddSource = useCallback(async () => {
     const parsed = parseRepoHome(addUrl);
     if (!parsed) {
-      showToast("无法解析仓库地址,请填写仓库主页 URL", "err");
+      showToast(t("ph.toastBadRepoUrl"), "err");
       return;
     }
     const provider: ProviderKind = addProvider === "auto" ? parsed.provider : addProvider;
@@ -324,9 +332,9 @@ export default function PluginHub({
     if (next) {
       setAddUrl("");
       setAddProvider("auto");
-      showToast(`已添加插件源 ${source.name}`);
+      showToast(t("ph.toastSourceAdded", { name: source.name }));
     }
-  }, [addUrl, addProvider, mutateState, showToast]);
+  }, [addUrl, addProvider, mutateState, showToast, t]);
 
   const activateSource = useCallback(
     async (id: string) => {
@@ -356,7 +364,7 @@ export default function PluginHub({
   const renderInstalled = () => (
     <div className="ph-list">
       {installedRows.length === 0 ? (
-        <div className="ph-empty">还没有已安装的插件,去「市场」看看。</div>
+        <div className="ph-empty">{t("ph.emptyInstalled")}</div>
       ) : (
         installedRows.map(({ id, entry, manifest }) => {
           const me = marketEntryFor(id);
@@ -368,12 +376,12 @@ export default function PluginHub({
               <div className="ph-row-main">
                 <div className="ph-row-title">
                   {manifest?.name ?? id}
-                  <span className="badge">{CHANNEL_LABELS[entry.channel]}</span>
-                  {entry.error ? <span className="badge danger">异常</span> : null}
+                  <span className="badge">{channelLabel(entry.channel)}</span>
+                  {entry.error ? <span className="badge danger">{t("ph.badgeError")}</span> : null}
                 </div>
                 <div className="ph-row-sub">
                   {entry.version} · {id}
-                  {manifest?.type === "i18n" ? " · 语言包" : ""}
+                  {manifest?.type === "i18n" ? t("ph.i18nSuffix") : ""}
                 </div>
                 {entry.error ? (
                   <div className="ph-row-error" title={entry.error}>
@@ -386,22 +394,25 @@ export default function PluginHub({
                   <button
                     className="btn small"
                     disabled={busy}
-                    title={`更新到 ${ref.version}(${CHANNEL_LABELS[entry.channel]})`}
+                    title={t("ph.updateTitle", {
+                      version: ref.version,
+                      channel: channelLabel(entry.channel),
+                    })}
                     onClick={() => void doInstall(me!, entry.channel)}
                   >
-                    更新 {ref.version}
+                    {t("ph.update", { version: ref.version })}
                   </button>
                 ) : null}
                 {isWindow && entry.enabled ? (
                   <button
                     className="icon-btn"
-                    title="打开插件窗口"
+                    title={t("ph.openWindow")}
                     onClick={() => openPluginWindow(id)}
                   >
                     <IconWindow size={16} />
                   </button>
                 ) : null}
-                <label className="switch" title={entry.enabled ? "停用" : "启用"}>
+                <label className="switch" title={entry.enabled ? t("ph.toggleDisable") : t("ph.toggleEnable")}>
                   <input
                     type="checkbox"
                     checked={entry.enabled}
@@ -411,7 +422,7 @@ export default function PluginHub({
                 </label>
                 <button
                   className="icon-btn"
-                  title="卸载"
+                  title={t("ph.uninstall")}
                   onClick={() => setUninstallTarget(id)}
                 >
                   <IconTrash size={15} />
@@ -429,7 +440,7 @@ export default function PluginHub({
       <div className="ph-form">
         <input
           className="input"
-          placeholder="仓库主页地址,如 https://github.com/owner/repo"
+          placeholder={t("ph.urlPlaceholder")}
           value={addUrl}
           onChange={(e) => setAddUrl(e.target.value)}
           onKeyDown={(e) => {
@@ -442,20 +453,20 @@ export default function PluginHub({
           className="input select"
           value={addProvider}
           onChange={(e) => setAddProvider(e.target.value as "auto" | ProviderKind)}
-          title="平台类型;非 GitHub/Gitee/GitLab 官方域名的仓库请手动选择"
+          title={t("ph.providerTitle")}
         >
-          <option value="auto">自动识别</option>
+          <option value="auto">{t("ph.providerAuto")}</option>
           <option value="github">GitHub</option>
           <option value="gitee">Gitee</option>
           <option value="gitlab">GitLab</option>
-          <option value="gitea">Gitea(自建)</option>
+          <option value="gitea">{t("ph.providerGitea")}</option>
         </select>
         <button
           className="btn primary"
           disabled={addUrl.trim() === ""}
           onClick={() => void handleAddSource()}
         >
-          添加
+          {t("ph.addSource")}
         </button>
       </div>
       {state && state.sources.length > 0 ? (
@@ -466,21 +477,19 @@ export default function PluginHub({
               name="active-source"
               checked={state.activeSourceId === s.id}
               onChange={() => void activateSource(s.id)}
-              title="设为生效源(同一时刻仅一个生效)"
+              title={t("ph.setActiveSource")}
             />
             <div className="ph-row-main">
               <div className="ph-row-title">{s.name}</div>
               <div className="ph-row-sub">
                 {s.url}
-                {s.branch ? ` · 分支 ${s.branch}` : ""}
+                {s.branch ? t("ph.sourceBranchSuffix", { branch: s.branch }) : ""}
               </div>
             </div>
           </label>
         ))
       ) : (
-        <div className="ph-empty">
-          还没有插件源。添加一个仓库主页地址(仓库根需有 pv-plugins.json)。
-        </div>
+        <div className="ph-empty">{t("ph.emptySources")}</div>
       )}
     </div>
   );
@@ -488,29 +497,27 @@ export default function PluginHub({
   const renderMarket = () => {
     if (!activeSource) {
       return (
-        <div className="ph-empty">
-          尚未激活插件源:请先在「插件源」中添加并激活一个源。
-        </div>
+        <div className="ph-empty">{t("ph.noActiveSourceHint")}</div>
       );
     }
     return (
       <div className="ph-list">
         <div className="ph-market-head">
           <span>
-            源:{market?.name || activeSource.name}
-            {marketLoading ? " · 拉取中…" : ""}
+            {t("ph.marketSource", { name: market?.name || activeSource.name })}
+            {marketLoading ? t("ph.fetchingSuffix") : ""}
           </span>
           <button
             className="btn small"
             onClick={() => void loadMarket(activeSource)}
             disabled={marketLoading}
           >
-            <IconRefresh size={14} /> 刷新
+            <IconRefresh size={14} /> {t("ph.refresh")}
           </button>
         </div>
         {marketError ? <div className="ph-row-error">{marketError}</div> : null}
         {market && market.plugins.length === 0 ? (
-          <div className="ph-empty">该源暂无可用插件。</div>
+          <div className="ph-empty">{t("ph.emptyMarket")}</div>
         ) : null}
         {market?.plugins.map((p) => (
           <MarketRow
@@ -529,26 +536,26 @@ export default function PluginHub({
     <div className="plugin-hub">
       <div className="ph-head">
         <div className="ph-title">
-          <IconPlugin size={16} /> 插件
+          <IconPlugin size={16} /> {t("ph.title")}
         </div>
         <div className="ph-sections">
           <button
             className={"ph-seg" + (section === "installed" ? " active" : "")}
             onClick={() => setSection("installed")}
           >
-            已安装 {installedRows.length}
+            {t("ph.tabInstalled", { n: installedRows.length })}
           </button>
           <button
             className={"ph-seg" + (section === "sources" ? " active" : "")}
             onClick={() => setSection("sources")}
           >
-            插件源 {state?.sources.length ?? 0}
+            {t("ph.tabSources", { n: state?.sources.length ?? 0 })}
           </button>
           <button
             className={"ph-seg" + (section === "market" ? " active" : "")}
             onClick={() => setSection("market")}
           >
-            <IconMarket size={14} /> 市场
+            <IconMarket size={14} /> {t("ph.tabMarket")}
           </button>
           {panels.map(({ pluginId, def }) => (
             <button
@@ -571,11 +578,13 @@ export default function PluginHub({
       </div>
 
       {installCandidate ? (
-        <Modal title="安装插件" onCancel={() => setInstallCandidate(null)}>
+        <Modal title={t("ph.installModalTitle")} onCancel={() => setInstallCandidate(null)}>
           <p className="modal-message">
-            「{installCandidate.entry.name}」{" "}
-            {installCandidate.entry[installCandidate.channel]?.version}(
-            {CHANNEL_LABELS[installCandidate.channel]})请求以下权限,同意后才安装:
+            {t("ph.installPermRequest", {
+              name: installCandidate.entry.name,
+              version: installCandidate.entry[installCandidate.channel]?.version ?? "",
+              channel: channelLabel(installCandidate.channel),
+            })}
           </p>
           <ul className="perm-list">
             {installCandidate.entry.permissions.map((p) => (
@@ -586,11 +595,11 @@ export default function PluginHub({
             ))}
           </ul>
           {installCandidate.entry.permissions.length === 0 ? (
-            <p className="muted">该插件未申请任何权限。</p>
+            <p className="muted">{t("ph.noPermissions")}</p>
           ) : null}
           <div className="modal-actions">
             <button className="btn" onClick={() => setInstallCandidate(null)}>
-              取消
+              {t("common.cancel")}
             </button>
             <button
               className="btn primary"
@@ -601,7 +610,7 @@ export default function PluginHub({
                 void doInstall(entry, channel);
               }}
             >
-              同意并安装
+              {t("ph.agreeInstall")}
             </button>
           </div>
         </Modal>
@@ -609,9 +618,11 @@ export default function PluginHub({
 
       {uninstallTarget ? (
         <ConfirmModal
-          title="卸载插件"
-          message={`确定卸载「${manifests[uninstallTarget]?.name ?? uninstallTarget}」?其数据目录与已下载文件将被删除,此操作不可恢复。`}
-          confirmText="卸载"
+          title={t("ph.uninstallModalTitle")}
+          message={t("ph.uninstallConfirm", {
+            name: manifests[uninstallTarget]?.name ?? uninstallTarget,
+          })}
+          confirmText={t("ph.uninstall")}
           danger
           onConfirm={() => void doUninstall(uninstallTarget)}
           onCancel={() => setUninstallTarget(null)}
@@ -634,6 +645,9 @@ function MarketRow({
   busy: boolean;
   onPick(channel: Channel): void;
 }) {
+  const { t } = useI18n();
+  const channelLabel = (channel: Channel): string =>
+    t(channel === "release" ? "ph.channelRelease" : "ph.channelBeta");
   const [channel, setChannel] = useState<Channel>(
     entry.release ? "release" : "beta",
   );
@@ -645,12 +659,12 @@ function MarketRow({
         <div className="ph-row-title">
           {entry.name}
           {installed ? (
-            <span className="badge ok">已安装 {installed.version}</span>
+            <span className="badge ok">{t("ph.installedVersion", { version: installed.version })}</span>
           ) : null}
         </div>
         <div className="ph-row-sub">{entry.desc || entry.id}</div>
         {entry.minAppVersion ? (
-          <div className="ph-row-sub muted">要求应用 ≥ {entry.minAppVersion}</div>
+          <div className="ph-row-sub muted">{t("ph.reqAppVersion", { version: entry.minAppVersion })}</div>
         ) : null}
       </div>
       <div className="ph-row-actions">
@@ -658,13 +672,17 @@ function MarketRow({
           className="input select small"
           value={channel}
           onChange={(e) => setChannel(e.target.value as Channel)}
-          title="选择通道"
+          title={t("ph.chooseChannel")}
         >
           {entry.release ? (
-            <option value="release">正式版 {entry.release.version}</option>
+            <option value="release">
+              {channelLabel("release")} {entry.release.version}
+            </option>
           ) : null}
           {entry.beta ? (
-            <option value="beta">测试版 {entry.beta.version}</option>
+            <option value="beta">
+              {channelLabel("beta")} {entry.beta.version}
+            </option>
           ) : null}
         </select>
         <button
@@ -672,7 +690,11 @@ function MarketRow({
           disabled={busy || !ref || installedCurrent}
           onClick={() => onPick(channel)}
         >
-          {installedCurrent ? "已是最新" : ref ? `安装 ${ref.version}` : "无可用包"}
+          {installedCurrent
+            ? t("ph.upToDate")
+            : ref
+              ? t("ph.installVersion", { version: ref.version })
+              : t("ph.noPackage")}
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import TagInput from "./TagInput";
+import { useI18n } from "../i18n";
 import { IconExport, IconTag, IconTrash, IconUndo } from "./icons";
 
 interface Props {
@@ -29,6 +30,7 @@ export default function BatchPanel({
   onBatchRestore,
   onBatchPurge,
 }: Props) {
+  const { t } = useI18n();
   const [tags, setTags] = useState<string[]>([]);
 
   const applyTags = () => {
@@ -41,18 +43,18 @@ export default function BatchPanel({
     <section className="detail">
       <div className="detail-inner batch-panel">
         <div className="batch-head">
-          <h2 className="detail-title">已选 {count} 条</h2>
+          <h2 className="detail-title">{t("batch.title", { n: count })}</h2>
           <div className="batch-head-actions">
             <button
               className="btn small"
               onClick={onSelectAll}
               disabled={allSelected}
-              title="全选当前筛选结果(受搜索与标签筛选影响)"
+              title={t("batch.selectAllTitle")}
             >
-              全选
+              {t("batch.selectAll")}
             </button>
             <button className="btn small" onClick={onClear}>
-              取消选择
+              {t("batch.clear")}
             </button>
           </div>
         </div>
@@ -60,7 +62,7 @@ export default function BatchPanel({
         {!trashOpen && (
           <div className="batch-tag-box">
             <div className="field grow">
-              <span className="label">批量添加标签(回车确认,可加多个)</span>
+              <span className="label">{t("batch.addTagsLabel")}</span>
               <TagInput value={tags} onChange={setTags} suggestions={allTags} />
             </div>
             <button
@@ -68,7 +70,7 @@ export default function BatchPanel({
               disabled={tags.length === 0}
               onClick={applyTags}
             >
-              <IconTag size={15} /> 添加标签
+              <IconTag size={15} /> {t("batch.addTags")}
             </button>
           </div>
         )}
@@ -80,13 +82,13 @@ export default function BatchPanel({
                 className="btn primary"
                 onClick={() => void onBatchRestore()}
               >
-                <IconUndo size={15} /> 批量恢复
+                <IconUndo size={15} /> {t("batch.restore")}
               </button>
               <button
                 className="btn danger"
                 onClick={() => void onBatchPurge()}
               >
-                <IconTrash size={15} /> 批量彻底删除
+                <IconTrash size={15} /> {t("batch.purge")}
               </button>
             </>
           ) : (
@@ -95,22 +97,19 @@ export default function BatchPanel({
                 className="btn danger"
                 onClick={() => void onBatchDelete()}
               >
-                <IconTrash size={15} /> 批量移入回收站
+                <IconTrash size={15} /> {t("batch.delete")}
               </button>
               <button
                 className="btn"
                 onClick={() => void onBatchExport()}
               >
-                <IconExport size={15} /> 导出所选
+                <IconExport size={15} /> {t("batch.export")}
               </button>
             </>
           )}
         </div>
 
-        <p className="batch-hint muted">
-          批量操作只作用于当前列表中的选中项;Ctrl+点击多选,Shift+点击连选,Ctrl+A
-          全选,Esc 取消。
-        </p>
+        <p className="batch-hint muted">{t("batch.hint")}</p>
       </div>
     </section>
   );

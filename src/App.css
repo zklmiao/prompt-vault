@@ -1015,6 +1015,29 @@ textarea.mono {
   line-height: 1.7;
 }
 
+/* 设置弹窗的「界面语言」下拉(语言切换为纯前端行为,浏览器预览也可用) */
+.settings-lang-select {
+  flex: 1;
+  appearance: none;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.settings-lang-select:hover,
+.settings-lang-select:focus {
+  border-color: var(--border-strong);
+}
+
 .settings-note {
   margin-top: 8px;
   color: var(--muted);

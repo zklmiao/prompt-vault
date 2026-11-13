@@ -65,6 +65,19 @@ let snapshot: I18nSnapshot = {
 const listeners = new Set<() => void>();
 /** locales 目录检测到的全部语言码(设置里即使不是当前语言也要可选) */
 let localeCodes: string[] = [];
+/** 上次提交的内容指纹:等价内容不换身份、不通知,防止依赖 t 的 effect 链被空气更新重触发 */
+let fingerprint = "";
+
+function fingerprintOf(s: I18nSnapshot): string {
+  return JSON.stringify([
+    s.langPref,
+    s.lang,
+    s.locales ? JSON.stringify(s.locales) : null,
+    s.packs.map((p) => [p.code, p.catalog]),
+    s.dicts.map((d) => [d.code, d.catalog]),
+    s.provided,
+  ]);
+}
 
 function notify(): void {
   for (const fn of listeners) fn();
@@ -90,18 +103,25 @@ function resolveLang(pref: string): string {
   return pref;
 }
 
-function recomputeProvided(): string[] {
+function recomputeProvided(s: I18nSnapshot): string[] {
   const codes = new Set<string>(localeCodes);
-  if (snapshot.locales) codes.add(snapshot.lang);
-  for (const p of snapshot.packs) codes.add(p.code);
-  for (const d of snapshot.dicts) codes.add(d.code);
+  if (s.locales) codes.add(s.lang);
+  for (const p of s.packs) codes.add(p.code);
+  for (const d of s.dicts) codes.add(d.code);
   return [...codes].sort((a, b) => a.localeCompare(b));
 }
 
 function rebuildSnapshot(): void {
-  const lang = resolveLang(snapshot.langPref);
-  setCurrentLang(lang);
-  snapshot = { ...snapshot, lang, provided: recomputeProvided() };
+  const next: I18nSnapshot = {
+    ...snapshot,
+    lang: resolveLang(snapshot.langPref),
+    provided: recomputeProvided(snapshot),
+  };
+  setCurrentLang(next.lang);
+  const fp = fingerprintOf(next);
+  snapshot = next;
+  if (fp === fingerprint) return;
+  fingerprint = fp;
   notify();
 }
 
@@ -172,6 +192,19 @@ async function loadLocaleCodes(): Promise<void> {
   }
 }
 
+/* ---------- 目录链构建(Provider 与 translate 共用) ---------- */
+
+function buildChain(snap: I18nSnapshot): Catalog[] {
+  return [
+    ...(snap.locales ? [snap.locales] : []),
+    // 语言包/插件字典按语言码存条目,只并入当前语言码的条目(其余码是候选语言,不是翻译层)
+    ...snap.packs.filter((p) => p.code === snap.lang).map((p) => p.catalog),
+    ...snap.dicts.filter((d) => d.code === snap.lang).map((d) => d.catalog),
+    ...(snap.lang === "en" ? [en as Catalog] : []),
+    zhCN as unknown as Catalog,
+  ];
+}
+
 /* ---------- Provider ---------- */
 
 const I18nContext = createContext<I18nApi | null>(null);
@@ -188,16 +221,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // 目录链只随快照变化重算一次,t() 查表 O(1)
-  const merged = useMemo<Catalog>(() => {
-    const chain: Catalog[] = [
-      ...(snap.locales ? [snap.locales] : []),
-      ...snap.packs.map((p) => p.catalog),
-      ...snap.dicts.map((d) => d.catalog),
-      ...(snap.lang === "en" ? [en as Catalog] : []),
-      zhCN as unknown as Catalog,
-    ];
-    return mergeCatalogs(chain);
-  }, [snap]);
+  const merged = useMemo<Catalog>(() => mergeCatalogs(buildChain(snap)), [snap]);
 
   const t = useCallback(
     (key: string, params?: Record<string, string | number>): string => {
@@ -247,6 +271,20 @@ export function refreshLang(): void {
   snapshot = { ...snapshot, langPref: readLangPref() };
   rebuildSnapshot();
   void reloadLocales();
+}
+
+/** 非 React 上下文的翻译入口(host.ts 等宿主模块用;取当前快照即时合并) */
+export function translate(
+  key: string,
+  params?: Record<string, string | number>,
+): string {
+  const merged = mergeCatalogs(buildChain(snapshot));
+  const value = merged[key];
+  if (value === undefined) {
+    if (import.meta.env.DEV) console.warn(`[pv-i18n] 缺少文案键:${key}`);
+    return key;
+  }
+  return interpolate(value, params);
 }
 
 /** zh 键类型复导出(组件内 t() 参数提示用) */

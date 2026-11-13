@@ -105,11 +105,12 @@ function ThemeToggle({
   theme: Theme;
   onToggle: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <button
       className="icon-btn"
       onClick={onToggle}
-      title={theme === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
+      title={theme === "dark" ? t("palette.cmdThemeLight") : t("palette.cmdThemeDark")}
     >
       {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
     </button>
@@ -117,13 +118,14 @@ function ThemeToggle({
 }
 
 function SetupScreen({ onPick }: { onPick: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="screen">
-      <h1>欢迎使用 Prompt Vault</h1>
-      <p>首次使用需要先选择收藏数据(prompts.json)的保存位置。</p>
-      <p className="muted">之后可在文件管理器里直接备份这个文件。</p>
+      <h1>{t("setup.title")}</h1>
+      <p>{t("setup.desc")}</p>
+      <p className="muted">{t("setup.hint")}</p>
       <button className="btn primary" onClick={onPick}>
-        选择数据文件位置
+        {t("setup.pick")}
       </button>
     </div>
   );
@@ -138,24 +140,22 @@ function LoadErrorScreen({
   restoreState: RestoreState;
   onRestore: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="screen">
-      <h1>数据文件解析失败</h1>
-      <p>以下文件不是有效的 Prompt Vault JSON,为防覆盖已暂停读写:</p>
+      <h1>{t("loadError.title")}</h1>
+      <p>{t("loadError.desc")}</p>
       <code className="error-path">{path}</code>
-      <p className="muted">
-        可以尝试用最近一次写入前的自动备份(prompts.json.bak)覆盖恢复,
-        也可以手工修复该文件后重启应用。
-      </p>
+      <p className="muted">{t("loadError.hint")}</p>
       {restoreState === "none" ? (
-        <p className="muted">旁边没有找到 .bak 备份文件。</p>
+        <p className="muted">{t("loadError.noBak")}</p>
       ) : (
         <button
           className="btn primary"
           disabled={restoreState === "doing"}
           onClick={onRestore}
         >
-          {restoreState === "doing" ? "恢复中…" : "用 .bak 备份恢复"}
+          {restoreState === "doing" ? t("loadError.restoring") : t("loadError.restore")}
         </button>
       )}
     </div>
@@ -259,15 +259,19 @@ export default function App() {
     }),
     [showToast, refreshPluginCommands, t],
   );
+  // bootstrap 只随 ready 触发一次:hooks 经 ref 取最新值,
+  // 否则 t 身份变化会重跑注入(注入又会更新 i18n 快照,形成反馈环)
+  const pluginHostHooksRef = useRef<HostHooks>(pluginHostHooks);
+  pluginHostHooksRef.current = pluginHostHooks;
 
   // 插件宿主:主窗口就绪后按 plugins.json enabled 顺序注入(失败隔离)
   useEffect(() => {
     if (!ready) return;
     if (windowLabel() !== "main") return;
-    void bootstrapPlugins(pluginHostHooks).catch((e) => {
+    void bootstrapPlugins(pluginHostHooksRef.current).catch((e) => {
       console.error("[pv] 插件宿主启动失败:", e);
     });
-  }, [ready, pluginHostHooks]);
+  }, [ready]);
 
   const markOnboarded = useCallback(() => {
     setOnboarded(true);
@@ -316,10 +320,10 @@ export default function App() {
       try {
         await writeDataFile(p, serializeDataFile(next));
       } catch (e) {
-        showToast(`保存失败:${String(e)}`, "err");
+        showToast(t("toast.saveFailed", { msg: String(e) }), "err");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const loadFrom = useCallback(
@@ -343,14 +347,14 @@ export default function App() {
 
   const chooseDataLocation = useCallback(async () => {
     const suggested = await firstRunDefaultPath();
-    const chosen = await chooseDataFileSave(suggested);
+    const chosen = await chooseDataFileSave(suggested, t("dialog.saveDataFile"));
     if (!chosen) return false;
     await setDataPath(chosen);
     dataPathRef.current = chosen;
     setSetupFailed(false);
     await loadFrom(chosen);
     return true;
-  }, [loadFrom]);
+  }, [loadFrom, t]);
 
   /** 静默重读磁盘:快速拾取窗口写入统计后,同步到主窗口内存 */
   const refreshFromDisk = useCallback(async () => {
@@ -380,8 +384,8 @@ export default function App() {
       }
       dataPathRef.current = p;
       await loadFrom(p);
-    })().catch((e) => showToast(`初始化失败:${String(e)}`, "err"));
-  }, [chooseDataLocation, loadFrom, showToast]);
+    })().catch((e) => showToast(t("toast.initFailed", { msg: String(e) }), "err"));
+  }, [chooseDataLocation, loadFrom, showToast, t]);
 
   // 托盘隐藏提示 + 全局"剪贴板新建"事件
   useEffect(() => {
@@ -390,7 +394,7 @@ export default function App() {
     (async () => {
       try {
         const u1 = await listen("hidden-to-tray", () => {
-          showToast("已收进托盘:左键图标唤出,右键菜单退出");
+          showToast(t("toast.trayHidden"));
         });
         if (disposed) {
           u1();
@@ -449,21 +453,21 @@ export default function App() {
             if (!p) return;
             const raw = await readDataFile(p);
             if (raw === null) {
-              showToast("该条目已不存在", "err");
+              showToast(t("toast.itemGone"), "err");
               return;
             }
             let parsed: PromptItem[] = [];
             try {
               parsed = coerceItems(JSON.parse(raw));
             } catch {
-              showToast("数据读取失败", "err");
+              showToast(t("toast.readFailed"), "err");
               return;
             }
             const target = parsed.find(
               (it) => it.id === e.payload && !it.deletedAt,
             );
             if (!target) {
-              showToast("该条目已不存在", "err");
+              showToast(t("toast.itemGone"), "err");
               return;
             }
             setItems(parsed);
@@ -492,7 +496,7 @@ export default function App() {
       disposed = true;
       unlistens.forEach((u) => u());
     };
-  }, [refreshFromDisk, showToast]);
+  }, [refreshFromDisk, showToast, t]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -599,17 +603,18 @@ export default function App() {
     setMode({ kind: "new" });
   }, []);
 
-  /** 引导第 2 步:带示例内容的预填 */
+  /** 引导第 2 步:带示例内容的预填(创建时取当前语言,创建后即用户数据,不随切换变) */
   const handleCreateSample = useCallback(() => {
     setPrefill({
-      title: "示例:代码审查助手",
-      body: "请审查以下代码变更:{{diff}}\n\n重点关注:{{关注点}}\n\n输出:问题清单、改进建议、是否可合并。",
-      source: "引导示例",
-      tags: ["示例"],
+      title: t("sample.title"),
+      body: t("sample.body"),
+      source: t("sample.source"),
+      tags: [t("sample.tag")],
+      kind: "sample",
     });
     setPrefillSeq((s) => s + 1);
     setMode({ kind: "new" });
-  }, []);
+  }, [t]);
 
   const newFromClipboard = useCallback(async () => {
     let text: string | null = null;
@@ -703,9 +708,9 @@ export default function App() {
           : it,
       );
       await persist(next);
-      showToast(`已为 ${selectedIds.size} 条添加标签`);
+      showToast(t("toast.batchTagsAdded", { n: selectedIds.size }));
     },
-    [items, selectedIds, persist, showToast],
+    [items, selectedIds, persist, showToast, t],
   );
 
   const handleBatchDelete = useCallback(async () => {
@@ -722,20 +727,20 @@ export default function App() {
       setMode({ kind: "view" });
     }
     clearSelection();
-    showToast(`已将 ${count} 条移入回收站`);
-  }, [items, selectedIds, selectedId, persist, clearSelection, showToast]);
+    showToast(t("toast.batchTrashed", { n: count }));
+  }, [items, selectedIds, selectedId, persist, clearSelection, showToast, t]);
 
   const handleBatchExport = useCallback(async () => {
     if (selectedItems.length === 0) return;
-    const path = await chooseExportFile("prompt-vault-selection.json");
+    const path = await chooseExportFile("prompt-vault-selection.json", t("dialog.exportFile"));
     if (!path) return;
     try {
       await writeDataFile(path, serializeDataFile(selectedItems));
-      showToast(`已导出 ${selectedItems.length} 条`);
+      showToast(t("toast.batchExported", { n: selectedItems.length }));
     } catch (e) {
-      showToast(`导出失败:${String(e)}`, "err");
+      showToast(t("toast.exportFailed", { msg: String(e) }), "err");
     }
-  }, [selectedItems, showToast]);
+  }, [selectedItems, showToast, t]);
 
   const handleBatchRestore = useCallback(async () => {
     const count = selectedIds.size;
@@ -747,8 +752,8 @@ export default function App() {
     setSelectedId(null);
     setMode({ kind: "view" });
     clearSelection();
-    showToast(`已恢复 ${count} 条`);
-  }, [items, selectedIds, persist, clearSelection, showToast]);
+    showToast(t("toast.batchRestored", { n: count }));
+  }, [items, selectedIds, persist, clearSelection, showToast, t]);
 
   const handleBatchPurge = useCallback(async () => {
     setBatchPurgeOpen(false);
@@ -762,8 +767,8 @@ export default function App() {
       setMode({ kind: "view" });
     }
     clearSelection();
-    showToast(`已彻底删除 ${count} 条`);
-  }, [items, selectedIds, selectedId, persist, clearSelection, showToast]);
+    showToast(t("toast.batchPurged", { n: count }));
+  }, [items, selectedIds, selectedId, persist, clearSelection, showToast, t]);
 
   // 多选快捷键:Ctrl+A 全选当前列表,Esc 清空(弹窗与输入框优先)
   useEffect(() => {
@@ -873,7 +878,7 @@ export default function App() {
         await persist([item, ...items]);
         setSelectedId(item.id);
         setMode({ kind: "view" });
-        showToast("已保存");
+        showToast(t("toast.saved"));
         // 任意新建成功即视为已完成引导,避免删光后反复出现
         markOnboarded();
       } else if (mode.kind === "edit") {
@@ -882,10 +887,10 @@ export default function App() {
         );
         await persist(next);
         setMode({ kind: "view" });
-        showToast("已保存");
+        showToast(t("toast.saved"));
       }
     },
-    [mode, items, persist, showToast, markOnboarded],
+    [mode, items, persist, showToast, markOnboarded, t],
   );
 
   // 软删除:进回收站,可恢复
@@ -899,9 +904,9 @@ export default function App() {
         setSelectedId(null);
         setMode({ kind: "view" });
       }
-      showToast("已移入回收站,可在回收站恢复");
+      showToast(t("toast.trashed"));
     },
-    [items, selectedId, persist, showToast],
+    [items, selectedId, persist, showToast, t],
   );
 
   const handleRestore = useCallback(
@@ -911,9 +916,9 @@ export default function App() {
       );
       await persist(next);
       setSelectedId(null);
-      showToast("已恢复");
+      showToast(t("toast.restored"));
     },
-    [items, persist, showToast],
+    [items, persist, showToast, t],
   );
 
   const handlePurge = useCallback(
@@ -924,9 +929,9 @@ export default function App() {
         setSelectedId(null);
         setMode({ kind: "view" });
       }
-      showToast("已彻底删除");
+      showToast(t("toast.purged"));
     },
-    [items, selectedId, persist, showToast],
+    [items, selectedId, persist, showToast, t],
   );
 
   // 置顶只是标记,不改 updatedAt,避免扰动"其余按更新时间倒序"
@@ -936,9 +941,9 @@ export default function App() {
         it.id === item.id ? { ...it, pinned: !it.pinned } : it,
       );
       await persist(next);
-      showToast(item.pinned ? "已取消置顶" : "已置顶");
+      showToast(item.pinned ? t("toast.unpinned") : t("toast.pinned"));
     },
-    [items, persist, showToast],
+    [items, persist, showToast, t],
   );
 
   const copyWithToast = useCallback(
@@ -948,11 +953,11 @@ export default function App() {
         showToast(okMsg);
         return true;
       } catch (e) {
-        showToast(`复制失败:${String(e)}`, "err");
+        showToast(t("toast.copyFailed", { msg: String(e) }), "err");
         return false;
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   /** 复制成功后更新内存计数,再让 Rust 串行写盘(失败静默,复制优先) */
@@ -980,17 +985,17 @@ export default function App() {
         setCopyTarget(item);
         return;
       }
-      const ok = await copyWithToast(item.body, "已复制到剪贴板");
+      const ok = await copyWithToast(item.body, t("toast.copied"));
       if (ok) await bumpCopyStat(item.id);
     },
-    [copyWithToast, bumpCopyStat],
+    [copyWithToast, bumpCopyStat, t],
   );
 
   const handleCopyFilled = useCallback(
     async (values: Record<string, string>) => {
       if (!copyTarget) return;
       const filled = fillPlaceholders(copyTarget.body, values);
-      const ok = await copyWithToast(filled, "已复制到剪贴板(变量已填充)");
+      const ok = await copyWithToast(filled, t("toast.copiedFilled"));
       setCopyTarget(null);
       if (!ok) return;
       // 统计先由 Rust 串行写盘,再把"上次填写值 + 本次计数"一次性落盘
@@ -1037,20 +1042,20 @@ export default function App() {
       try {
         const raw = await readDataFile(path);
         if (raw === null) {
-          showToast("无法读取该文件", "err");
+          showToast(t("toast.importReadFailed"), "err");
           return;
         }
         const incoming = coerceItems(JSON.parse(raw));
         if (incoming.length === 0) {
-          showToast("文件中没有可导入的记录", "err");
+          showToast(t("toast.importEmpty"), "err");
           return;
         }
         setImportCandidate(incoming);
       } catch {
-        showToast("文件解析失败,请确认是 Prompt Vault 导出的 JSON", "err");
+        showToast(t("toast.importParseFailed"), "err");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   // 主列表键盘闭环:↑↓/Home/End 导航,Enter 复制,Ctrl+E 编辑,Space 勾选
@@ -1168,10 +1173,10 @@ export default function App() {
   ]);
 
   const handleImportPick = useCallback(async () => {
-    const path = await chooseImportFile();
+    const path = await chooseImportFile(t("dialog.importFile"));
     if (!path) return;
     await importFromPath(path);
-  }, [importFromPath]);
+  }, [importFromPath, t]);
 
   /** 收藏/插件分栏切换:清空列表选择与编辑态 */
   const switchPane = useCallback((next: "collection" | "plugins") => {
@@ -1188,18 +1193,18 @@ export default function App() {
     async (paths: string[]) => {
       const list = paths.filter((p) => typeof p === "string" && p.length > 0);
       if (list.length === 0) return;
-      if (list.length > 1) showToast("一次仅处理一个文件");
+      if (list.length > 1) showToast(t("toast.oneFileAtATime"));
       const path = list[0];
       const multi = list.length > 1;
       const name = fileNameOf(path);
       const meta = await pathMeta(path).catch(() => null);
       if (meta?.isDir) {
-        showToast("不支持文件夹", "err");
+        showToast(t("toast.folderUnsupported"), "err");
         return;
       }
       if (name.toLowerCase().endsWith(".json")) {
         if (meta && meta.size > 10 * 1024 * 1024) {
-          showToast("JSON 文件超过 10MB,已拒绝", "err");
+          showToast(t("toast.jsonTooLarge"), "err");
           return;
         }
         await importFromPath(path);
@@ -1207,7 +1212,7 @@ export default function App() {
       }
       // 其余一律按文本处理
       if (meta && meta.size > 1024 * 1024) {
-        showToast("文本文件超过 1MB,已拒绝", "err");
+        showToast(t("toast.textTooLarge"), "err");
         return;
       }
       let raw: string | null = null;
@@ -1217,18 +1222,23 @@ export default function App() {
         raw = null;
       }
       if (raw === null) {
-        showToast("读取失败,请确认是 UTF-8 文本", "err");
+        showToast(t("toast.dropReadFailed"), "err");
         return;
       }
-      const title = name.replace(/\.[^.]+$/, "") || "未命名";
-      setPrefill({ title, body: raw, source: `拖入:${name}` });
+      const title = name.replace(/\.[^.]+$/, "") || t("common.untitled");
+      setPrefill({
+        title,
+        body: raw,
+        source: t("toast.dropSourcePrefix", { name }),
+        kind: "drop",
+      });
       setPrefillSeq((s) => s + 1);
       setTrashOpen(false);
       setSelectedId(null);
       setMode({ kind: "new" });
-      showToast(multi ? `一次仅处理一个文件,已载入:${name}` : "已载入拖入内容");
+      showToast(multi ? t("toast.dropLoadedNamed", { name }) : t("toast.dropLoaded"));
     },
-    [importFromPath, showToast],
+    [importFromPath, showToast, t],
   );
 
   // 主窗口拖放:用 Tauri 原生事件(HTML5 drop 会被原生拖放拦截)
@@ -1276,7 +1286,7 @@ export default function App() {
       if (how === "overwrite") {
         await persist(incoming);
         clearSelection();
-        showToast(`导入完成:已覆盖为 ${incoming.length} 条`);
+        showToast(t("toast.importOverwriteDone", { n: incoming.length }));
         return;
       }
       const byId = new Map(items.map((it) => [it.id, it]));
@@ -1301,21 +1311,21 @@ export default function App() {
       }
       await persist([...byId.values()]);
       clearSelection();
-      showToast(`导入完成:新增 ${added} 条,更新 ${updated} 条`);
+      showToast(t("toast.importDone", { added, updated }));
     },
-    [importCandidate, items, persist, clearSelection, showToast],
+    [importCandidate, items, persist, clearSelection, showToast, t],
   );
 
   const handleExport = useCallback(async () => {
-    const path = await chooseExportFile("prompt-vault-export.json");
+    const path = await chooseExportFile("prompt-vault-export.json", t("dialog.exportFile"));
     if (!path) return;
     try {
       await writeDataFile(path, serializeDataFile(items));
-      showToast("导出成功");
+      showToast(t("toast.exportOk"));
     } catch (e) {
-      showToast(`导出失败:${String(e)}`, "err");
+      showToast(t("toast.exportFailed", { msg: String(e) }), "err");
     }
-  }, [items, showToast]);
+  }, [items, showToast, t]);
 
   const handleRestoreBackup = useCallback(async () => {
     const p = loadError;
@@ -1330,12 +1340,12 @@ export default function App() {
       setLoadError(null);
       setRestoreState("idle");
       await loadFrom(p);
-      showToast("已从 .bak 备份恢复");
+      showToast(t("toast.restoreOk"));
     } catch (e) {
       setRestoreState("idle");
-      showToast(`恢复失败:${String(e)}`, "err");
+      showToast(t("toast.restoreFailed", { msg: String(e) }), "err");
     }
-  }, [loadError, loadFrom, showToast]);
+  }, [loadError, loadFrom, showToast, t]);
 
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
     const closeThen = (fn: () => void) => () => {
@@ -1346,7 +1356,7 @@ export default function App() {
       {
         id: "new",
         group: "收藏",
-        label: "新建 prompt",
+        label: t("palette.cmdNew"),
         keywords: ["new", "create", "xinjian", "新建"],
         shortcut: "Ctrl+N",
         icon: <IconPlus size={15} />,
@@ -1355,7 +1365,7 @@ export default function App() {
       {
         id: "clipboard-new",
         group: "收藏",
-        label: "从剪贴板新建",
+        label: t("palette.cmdClipboardNew"),
         keywords: ["clipboard", "paste", "剪贴板", "粘贴"],
         shortcut: formatHotkey(hotkeys.clipboard_new),
         icon: <IconClipboard size={15} />,
@@ -1364,7 +1374,7 @@ export default function App() {
       {
         id: "import",
         group: "收藏",
-        label: "导入 JSON",
+        label: t("palette.cmdImport"),
         keywords: ["import", "json", "导入"],
         icon: <IconImport size={15} />,
         run: closeThen(() => void handleImportPick()),
@@ -1372,7 +1382,7 @@ export default function App() {
       {
         id: "export",
         group: "收藏",
-        label: "导出 JSON",
+        label: t("palette.cmdExport"),
         keywords: ["export", "json", "导出"],
         icon: <IconExport size={15} />,
         run: closeThen(() => void handleExport()),
@@ -1380,7 +1390,7 @@ export default function App() {
       {
         id: "trash",
         group: "收藏",
-        label: trashOpen ? "返回收藏列表" : "打开回收站",
+        label: trashOpen ? t("palette.cmdTrashBack") : t("palette.cmdTrashOpen"),
         keywords: ["trash", "recycle", "回收站", "返回"],
         icon: trashOpen ? <IconUndo size={15} /> : <IconTrash size={15} />,
         run: closeThen(toggleTrash),
@@ -1388,7 +1398,7 @@ export default function App() {
       {
         id: "theme",
         group: "视图",
-        label: theme === "dark" ? "切换到亮色模式" : "切换到暗色模式",
+        label: theme === "dark" ? t("palette.cmdThemeLight") : t("palette.cmdThemeDark"),
         keywords: ["theme", "dark", "light", "主题", "暗色", "亮色"],
         icon: theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />,
         run: closeThen(toggleTheme),
@@ -1396,7 +1406,7 @@ export default function App() {
       {
         id: "sort-updated",
         group: "视图",
-        label: "排序:最近更新",
+        label: t("palette.cmdSortUpdated"),
         keywords: ["sort", "updated", "排序", "更新"],
         checked: sortMode === "updated",
         run: closeThen(() => setSortMode("updated")),
@@ -1404,7 +1414,7 @@ export default function App() {
       {
         id: "sort-recent",
         group: "视图",
-        label: "排序:最近复制",
+        label: t("palette.cmdSortRecent"),
         keywords: ["sort", "recent", "排序", "复制"],
         checked: sortMode === "recent",
         run: closeThen(() => setSortMode("recent")),
@@ -1412,7 +1422,7 @@ export default function App() {
       {
         id: "sort-most",
         group: "视图",
-        label: "排序:最常复制",
+        label: t("palette.cmdSortMost"),
         keywords: ["sort", "most", "排序", "常用"],
         checked: sortMode === "most",
         run: closeThen(() => setSortMode("most")),
@@ -1420,7 +1430,7 @@ export default function App() {
       {
         id: "cheatsheet",
         group: "视图",
-        label: "快捷键速查表",
+        label: t("palette.cmdCheatsheet"),
         keywords: ["shortcut", "keys", "快捷键", "帮助", "?"],
         shortcut: "?",
         icon: <IconSparkles size={15} />,
@@ -1429,16 +1439,16 @@ export default function App() {
       {
         id: "settings",
         group: "应用",
-        label: "打开设置",
+        label: t("palette.cmdSettings"),
         keywords: ["settings", "hotkey", "设置", "热键"],
-        hint: `快速拾取 ${formatHotkey(hotkeys.quickpick)}`,
+        hint: t("palette.cmdSettingsHint", { hotkey: formatHotkey(hotkeys.quickpick) }),
         icon: <IconSettings size={15} />,
         run: closeThen(() => setSettingsOpen(true)),
       },
       {
         id: "open-plugins",
         group: "应用",
-        label: "打开插件区",
+        label: t("palette.cmdOpenPlugins"),
         keywords: ["plugins", "market", "plugin", "插件", "插件市场"],
         icon: <IconPlugin size={15} />,
         run: closeThen(() => switchPane("plugins")),
@@ -1449,6 +1459,7 @@ export default function App() {
     theme,
     sortMode,
     hotkeys,
+    t,
     startNew,
     newFromClipboard,
     handleImportPick,
@@ -1495,7 +1506,7 @@ export default function App() {
       <div className="app">
         <TitleBar />
         <div className="screen">
-          <div className="spinner" aria-label="加载中" />
+          <div className="spinner" aria-label={t("common.loading")} />
         </div>
       </div>
     );
@@ -1510,7 +1521,7 @@ export default function App() {
           <input
             ref={searchRef}
             className="search"
-            placeholder="搜索 标题 / 正文 / 标签 / 备注…(Ctrl+F)"
+            placeholder={t("header.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             aria-controls="pv-list"
@@ -1519,7 +1530,7 @@ export default function App() {
           {activeTag && !trashOpen && (
             <button
               className="tag-filter"
-              title="清除标签筛选"
+              title={t("header.clearTagFilter")}
               onClick={() => setActiveTag(null)}
             >
               #{activeTag}
@@ -1529,31 +1540,31 @@ export default function App() {
         </div>
         <div className="header-actions">
           <button className="btn primary" onClick={startNew}>
-            <IconPlus size={15} /> 新建 (Ctrl+N)
+            <IconPlus size={15} /> {t("header.new")}
           </button>
           <button
             className="btn"
-            title="把剪贴板内容存为新收藏(全局快捷键 Alt+Shift+N)"
+            title={t("header.clipboardTip")}
             onClick={() => void newFromClipboard()}
           >
-            <IconClipboard size={15} /> 剪贴板
+            <IconClipboard size={15} /> {t("header.clipboard")}
           </button>
           <button
             className={"btn" + (trashOpen ? " pressed" : "")}
             onClick={toggleTrash}
-            title="回收站"
+            title={t("header.trash")}
           >
-            <IconTrash size={15} /> 回收站
+            <IconTrash size={15} /> {t("header.trash")}
           </button>
           <button className="btn" onClick={() => void handleImportPick()}>
-            <IconImport size={15} /> 导入
+            <IconImport size={15} /> {t("header.import")}
           </button>
           <button className="btn" onClick={() => void handleExport()}>
-            <IconExport size={15} /> 导出
+            <IconExport size={15} /> {t("header.export")}
           </button>
           <button
             className="icon-btn"
-            title="设置(全局热键)"
+            title={t("header.settingsTitle")}
             onClick={() => setSettingsOpen(true)}
           >
             <IconSettings size={16} />
@@ -1563,22 +1574,22 @@ export default function App() {
       </header>
 
       <div className="main">
-        <nav className="pane-rail" aria-label="主区分栏">
+        <nav className="pane-rail" aria-label={t("pane.railAria")}>
           <button
             className={"pane-tab" + (pane === "collection" ? " active" : "")}
             onClick={() => switchPane("collection")}
-            title="收藏"
+            title={t("pane.favorites")}
           >
             <IconSparkles size={16} />
-            <span>收藏</span>
+            <span>{t("pane.favorites")}</span>
           </button>
           <button
             className={"pane-tab" + (pane === "plugins" ? " active" : "")}
             onClick={() => switchPane("plugins")}
-            title="插件"
+            title={t("pane.plugins")}
           >
             <IconPlugin size={16} />
-            <span>插件</span>
+            <span>{t("pane.plugins")}</span>
           </button>
         </nav>
         {pane === "plugins" ? (
@@ -1664,9 +1675,11 @@ export default function App() {
       )}
       {purgeTarget && (
         <ConfirmModal
-          title="彻底删除"
-          message={`确定彻底删除「${purgeTarget.title || "未命名"}」?此操作不可恢复。`}
-          confirmText="彻底删除"
+          title={t("confirm.purgeTitle")}
+          message={t("confirm.purgeMessage", {
+            name: purgeTarget.title || t("common.untitled"),
+          })}
+          confirmText={t("confirm.purgeTitle")}
           danger
           onConfirm={() => void handlePurge(purgeTarget)}
           onCancel={() => setPurgeTarget(null)}
@@ -1674,9 +1687,9 @@ export default function App() {
       )}
       {batchPurgeOpen && (
         <ConfirmModal
-          title="彻底删除"
-          message={`确定彻底删除选中的 ${selectedIds.size} 条?此操作不可恢复。`}
-          confirmText="彻底删除"
+          title={t("confirm.purgeTitle")}
+          message={t("confirm.batchPurgeMessage", { n: selectedIds.size })}
+          confirmText={t("confirm.purgeTitle")}
           danger
           onConfirm={() => void handleBatchPurge()}
           onCancel={() => setBatchPurgeOpen(false)}

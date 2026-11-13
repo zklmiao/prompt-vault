@@ -1,4 +1,5 @@
 import Modal from "./Modal";
+import { useI18n } from "../i18n";
 
 interface Props {
   title: string;
@@ -17,12 +18,13 @@ export default function ConfirmModal({
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useI18n();
   return (
     <Modal title={title} onCancel={onCancel}>
       <p className="modal-message">{message}</p>
       <div className="modal-actions">
         <button className="btn" onClick={onCancel}>
-          取消
+          {t("common.cancel")}
         </button>
         <button
           className={"btn " + (danger ? "danger-solid" : "primary")}

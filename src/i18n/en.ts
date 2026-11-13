@@ -15,6 +15,7 @@ export const en: Partial<Record<ZhKey, string>> = {
   "common.statsCopied": "Copied {n} times · last {date}",
 
   /* ---- pane ---- */
+  "pane.railAria": "Main panes",
   "pane.favorites": "Favorites",
   "pane.plugins": "Plugins",
 
@@ -71,6 +72,13 @@ export const en: Partial<Record<ZhKey, string>> = {
   "toast.dropReadFailed": "Read failed; make sure it is UTF-8 text",
   "toast.dropLoaded": "Dropped content loaded",
   "toast.dropLoadedNamed": "Only one file is processed at a time; loaded: {name}",
+  "toast.dropSourcePrefix": "Dropped: {name}",
+
+  /* ---- onboarding sample content ---- */
+  "sample.title": "Sample: Code review assistant",
+  "sample.body": "Please review the following code changes: {{diff}}\n\nFocus on: {{concerns}}\n\nOutput: issue list, improvement suggestions, merge verdict.",
+  "sample.source": "Onboarding sample",
+  "sample.tag": "Sample",
   "toast.importReadFailed": "Cannot read that file",
   "toast.importEmpty": "No importable records in the file",
   "toast.importParseFailed": "Failed to parse the file; make sure it is JSON exported by Prompt Vault",
@@ -79,6 +87,17 @@ export const en: Partial<Record<ZhKey, string>> = {
   "toast.exportOk": "Exported successfully",
   "toast.restoreOk": "Restored from .bak backup",
   "toast.restoreFailed": "Restore failed: {msg}",
+
+  /* ---- native dialogs ---- */
+  "dialog.saveDataFile": "Choose where to save the Prompt data file",
+  "dialog.exportFile": "Export Prompt favorites",
+  "dialog.importFile": "Import Prompt favorites",
+
+  /* ---- host injection errors (Rust-side errors pass through untranslated) ---- */
+  "host.errNoEntry": "main.js of the current version not found (plugin files missing)",
+  "host.errScript": "Plugin script error: {msg}",
+  "host.errTimeout": "Load timed out: plugin did not call any pv.* registration within 3s",
+  "host.errBadStateJson": "plugins.json has an unexpected structure",
 
   /* ---- palette groups & commands ---- */
   "palette.group.favorites": "Favorites",
@@ -262,6 +281,8 @@ export const en: Partial<Record<ZhKey, string>> = {
   "qp.footerEdit": "Tab Edit",
   "qp.footerClose": "Esc Close",
   "qp.copied": "Copied",
+  "qp.copiedCount": "Copied {n} times",
+  "qp.neverCopied": "Never copied",
   "qp.variablesFilled": "{n} variables filled",
   "qp.copyFailed": "Copy failed",
 
@@ -275,7 +296,8 @@ export const en: Partial<Record<ZhKey, string>> = {
   "onboard.step2Desc": "Write {{variable}} in the body; a dialog asks for values before copying, same-name variables asked once.",
   "onboard.createSample": "Create sample",
   "onboard.step3Title": "On call",
-  "onboard.step3Desc": "Press {hotkey} anywhere to open quick pick, type a few letters, press Enter to copy.",
+  "onboard.step3Prefix": "Press",
+  "onboard.step3Suffix": "anywhere to open quick pick, type a few letters, press Enter to copy.",
   "onboard.skip": "Skip onboarding",
 
   /* ---- titlebar ---- */
@@ -308,7 +330,10 @@ export const en: Partial<Record<ZhKey, string>> = {
   "ph.urlPlaceholder": "Repository home URL, e.g. https://github.com/owner/repo",
   "ph.addSource": "Add",
   "ph.providerAuto": "Auto detect",
+  "ph.providerGitea": "Gitea (self-hosted)",
   "ph.providerTitle": "Platform type; pick manually for repos not on official GitHub/Gitee/GitLab domains",
+  "ph.setActiveSource": "Set as the active source (only one is effective at a time)",
+  "ph.badSourceUrl": "Cannot parse the source URL; expected a repository home URL",
   "ph.emptySources": "No sources yet. Add a repository home URL (repo root must contain pv-plugins.json).",
   "ph.sourceBranchSuffix": " · branch {branch}",
   "ph.noActiveSource": "No active source: add and activate one under \"Sources\" first",

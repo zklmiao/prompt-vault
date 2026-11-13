@@ -18,6 +18,7 @@ import {
 } from "./util";
 import type { PromptMatch } from "./util";
 import type { PromptItem } from "./types";
+import { refreshLang, useI18n } from "./i18n";
 import PlaceholderModal from "./components/PlaceholderModal";
 import TagChips from "./components/TagChips";
 import BodyText from "./components/BodyText";
@@ -41,6 +42,7 @@ interface Section {
 
 /** 全局快捷键唤出的快速拾取面板:搜索 → Enter 复制 → 确认态 → 自动隐藏 */
 export default function QuickPick() {
+  const { t } = useI18n();
   const [items, setItems] = useState<PromptItem[]>([]);
   const [query, setQuery] = useState("");
   const [idx, setIdx] = useState(0);
@@ -64,22 +66,22 @@ export default function QuickPick() {
       setDataPath(p);
       if (!p) {
         setItems([]);
-        setError("尚未选择数据文件,请先在主窗口完成首次设置");
+        setError(t("qp.noDataFile"));
         return;
       }
       const raw = await readDataFile(p);
       if (raw === null) {
         setItems([]);
-        setError("数据文件不存在或无法读取");
+        setError(t("qp.dataFileMissing"));
         return;
       }
       setItems(coerceItems(JSON.parse(raw)).filter((i) => !i.deletedAt));
       setError(null);
     } catch {
       setItems([]);
-      setError("数据读取失败");
+      setError(t("qp.readFailed"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadData();
@@ -97,7 +99,8 @@ export default function QuickPick() {
           setQuery("");
           setIdx(0);
           setError(null);
-          // 窗口常驻隐藏,每次显示都重新读盘,避免展示旧数据
+          // 窗口常驻隐藏:重读语言偏好(否则感知不到主窗口里的切换)并重新读盘
+          refreshLang();
           void loadData();
           inputRef.current?.focus();
         });
@@ -151,13 +154,13 @@ export default function QuickPick() {
     const out: Section[] = [];
     if (recent.length > 0) {
       out.push({
-        title: "最近复制",
+        title: t("qp.recentSection"),
         rows: recent.map((item) => ({ item, match: null })),
       });
     }
     if (most.length > 0) {
       out.push({
-        title: "最常复制",
+        title: t("qp.mostSection"),
         rows: most.map((item) => ({ item, match: null })),
       });
     }
@@ -175,7 +178,7 @@ export default function QuickPick() {
       });
     }
     return out;
-  }, [items, query]);
+  }, [items, query, t]);
 
   const flat = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
   const selected = flat[idx];
@@ -226,13 +229,13 @@ export default function QuickPick() {
       try {
         await copyToClipboard(item.body);
       } catch {
-        setError("复制失败");
+        setError(t("qp.copyFailed"));
         return;
       }
       await bump(item.id);
       startConfirm(0);
     },
-    [bump, startConfirm],
+    [bump, startConfirm, t],
   );
 
   // 确认态期间:任何位置的 Esc 都立即隐藏
@@ -290,7 +293,7 @@ export default function QuickPick() {
             autoFocus
             readOnly={!!copied}
             className="qp-input"
-            placeholder="搜索 prompt,↑↓ 选择,Enter 复制,Tab 编辑,Esc 关闭"
+            placeholder={t("qp.inputPlaceholder")}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -323,7 +326,7 @@ export default function QuickPick() {
                         <span className="qp-title">
                           {row.item.pinned && <span className="star">★ </span>}
                           <Highlight
-                            text={row.item.title || "未命名"}
+                            text={row.item.title || t("common.untitled")}
                             ranges={row.match?.title?.ranges}
                           />
                         </span>
@@ -357,7 +360,7 @@ export default function QuickPick() {
             ))}
             {flat.length === 0 && (
               <div className="qp-empty">
-                {query.trim() ? "没有匹配的 prompt" : "还没有可显示的 prompt"}
+                {query.trim() ? t("qp.noMatch") : t("qp.nothingToShow")}
               </div>
             )}
           </div>
@@ -365,7 +368,7 @@ export default function QuickPick() {
             {selected ? (
               <>
                 <div className="qp-prev-title">
-                  {selected.item.title || "未命名"}
+                  {selected.item.title || t("common.untitled")}
                 </div>
                 {selected.item.tags.length > 0 && (
                   <div className="qp-prev-tags">
@@ -374,13 +377,13 @@ export default function QuickPick() {
                 )}
                 {selected.item.source && (
                   <div className="qp-prev-line">
-                    <span className="label">来源</span>
+                    <span className="label">{t("common.source")}</span>
                     <span> {selected.item.source}</span>
                   </div>
                 )}
                 {selected.item.note && (
                   <div className="qp-prev-line">
-                    <span className="label">备注</span>
+                    <span className="label">{t("common.note")}</span>
                     <span> {selected.item.note}</span>
                   </div>
                 )}
@@ -389,31 +392,32 @@ export default function QuickPick() {
                 </pre>
                 <div className="qp-prev-meta">
                   {(selected.item.copyCount ?? 0) > 0
-                    ? `已复制 ${selected.item.copyCount} 次${
-                        selected.item.lastCopiedAt
-                          ? ` · 最近 ${formatDate(selected.item.lastCopiedAt)}`
-                          : ""
-                      }`
-                    : "尚未复制过"}
+                    ? selected.item.lastCopiedAt
+                      ? t("common.statsCopied", {
+                          n: selected.item.copyCount ?? 0,
+                          date: formatDate(selected.item.lastCopiedAt),
+                        })
+                      : t("qp.copiedCount", { n: selected.item.copyCount ?? 0 })
+                    : t("qp.neverCopied")}
                 </div>
               </>
             ) : (
-              <div className="qp-prev-empty">选中一条 prompt 查看预览</div>
+              <div className="qp-prev-empty">{t("qp.prevEmpty")}</div>
             )}
           </div>
         </div>
         <div className="qp-footer">
-          <span>↩ 复制</span>
-          <span>Tab 编辑</span>
-          <span>Esc 关闭</span>
+          <span>{t("qp.footerCopy")}</span>
+          <span>{t("qp.footerEdit")}</span>
+          <span>{t("qp.footerClose")}</span>
         </div>
         {copied && (
           <div className="qp-confirm">
             <IconCheck size={26} />
-            <div className="qp-confirm-text">已复制</div>
+            <div className="qp-confirm-text">{t("qp.copied")}</div>
             {copied.variables > 0 && (
               <div className="qp-confirm-sub">
-                {copied.variables} 个变量已填充
+                {t("qp.variablesFilled", { n: copied.variables })}
               </div>
             )}
           </div>
@@ -428,7 +432,7 @@ export default function QuickPick() {
               try {
                 await copyToClipboard(filled);
               } catch {
-                setError("复制失败");
+                setError(t("qp.copyFailed"));
                 setFillTarget(null);
                 return;
               }

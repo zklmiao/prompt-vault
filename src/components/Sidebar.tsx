@@ -1,5 +1,6 @@
 import type { PromptItem, SortMode } from "../types";
 import { formatDate } from "../util";
+import { useI18n } from "../i18n";
 import TagChips from "./TagChips";
 import { IconCopy } from "./icons";
 
@@ -32,11 +33,13 @@ export default function Sidebar({
   onTagClick,
   onQuickCopy,
 }: Props) {
+  const { t } = useI18n();
+
   const head = trashOpen
-    ? `回收站 ${items.length} 条`
+    ? t("sidebar.trashCount", { n: items.length })
     : items.length === total
-      ? `共 ${total} 条`
-      : `匹配 ${items.length} / ${total} 条`;
+      ? t("sidebar.countAll", { n: total })
+      : t("sidebar.countMatch", { n: items.length, total });
 
   const selecting = selectedIds.size > 0;
 
@@ -49,12 +52,12 @@ export default function Sidebar({
             className="sort-select"
             value={sortMode}
             onChange={(e) => onSortChange(e.target.value as SortMode)}
-            title="排序方式(置顶始终在最前)"
-            aria-label="排序方式"
+            title={t("sidebar.sortTitle")}
+            aria-label={t("sidebar.sortAria")}
           >
-            <option value="updated">最近更新</option>
-            <option value="recent">最近复制</option>
-            <option value="most">最常复制</option>
+            <option value="updated">{t("sidebar.sortUpdated")}</option>
+            <option value="recent">{t("sidebar.sortRecent")}</option>
+            <option value="most">{t("sidebar.sortMost")}</option>
           </select>
         )}
       </div>
@@ -62,7 +65,7 @@ export default function Sidebar({
         className={"list" + (selecting ? " selecting" : "")}
         role="listbox"
         aria-multiselectable="true"
-        aria-label={trashOpen ? "回收站列表" : "收藏列表"}
+        aria-label={trashOpen ? t("sidebar.trashListAria") : t("sidebar.listAria")}
         id="pv-list"
       >
         {items.map((it, index) => {
@@ -84,8 +87,8 @@ export default function Sidebar({
               onClick={(e) => onRowClick(it.id, e)}
               onFocus={(e) => {
                 // 行内按钮/复选框获得焦点时不改变活动项
-                const t = e.target as HTMLElement;
-                if (t.closest("button") || t.tagName === "INPUT") return;
+                const target = e.target as HTMLElement;
+                if (target.closest("button") || target.tagName === "INPUT") return;
                 onRowFocus(it.id);
               }}
             >
@@ -96,15 +99,17 @@ export default function Sidebar({
                 onChange={() => onCheckbox(it.id)}
                 onClick={(e) => e.stopPropagation()}
                 tabIndex={-1}
-                aria-label={`选择「${it.title || "未命名"}」`}
+                aria-label={t("sidebar.ariaSelect", {
+                  name: it.title || t("common.untitled"),
+                })}
               />
               <div className="row-title">
                 {!trashOpen && it.pinned && <span className="star">★ </span>}
-                {it.title || "未命名"}
+                {it.title || t("common.untitled")}
               </div>
               {trashOpen ? (
                 <div className="row-sub">
-                  删除于 {formatDate(it.deletedAt)}
+                  {t("detail.metaDeletedAt", { date: formatDate(it.deletedAt) })}
                 </div>
               ) : (
                 <>
@@ -115,7 +120,10 @@ export default function Sidebar({
                   )}
                   {(it.copyCount ?? 0) > 0 && (
                     <div className="row-stats">
-                      已复制 {it.copyCount} 次 · 最近 {formatDate(it.lastCopiedAt)}
+                      {t("common.statsCopied", {
+                        n: it.copyCount ?? 0,
+                        date: formatDate(it.lastCopiedAt),
+                      })}
                     </div>
                   )}
                 </>
@@ -124,7 +132,7 @@ export default function Sidebar({
                 <button
                   type="button"
                   className="row-copy"
-                  title="复制"
+                  title={t("common.copy")}
                   onClick={(e) => {
                     e.stopPropagation();
                     onQuickCopy(it);
@@ -139,10 +147,10 @@ export default function Sidebar({
         {items.length === 0 && (
           <div className="list-empty">
             {trashOpen
-              ? "回收站是空的。"
+              ? t("sidebar.emptyTrash")
               : total === 0
-                ? "还没有收藏。点击右上角「新建」添加第一条 prompt。"
-                : "没有匹配的收藏,换个关键词试试。"}
+                ? t("sidebar.emptyAll")
+                : t("sidebar.emptyNoMatch")}
           </div>
         )}
       </div>

@@ -14,6 +14,7 @@ export const zhCN = {
   "common.statsCopied": "已复制 {n} 次 · 最近 {date}",
 
   /* ---- 主区分栏 ---- */
+  "pane.railAria": "主区分栏",
   "pane.favorites": "收藏",
   "pane.plugins": "插件",
 
@@ -70,6 +71,14 @@ export const zhCN = {
   "toast.dropReadFailed": "读取失败,请确认是 UTF-8 文本",
   "toast.dropLoaded": "已载入拖入内容",
   "toast.dropLoadedNamed": "一次仅处理一个文件,已载入:{name}",
+  /** 拖入内容的来源前缀(创建时取当前语言写入用户数据,之后不随切换变) */
+  "toast.dropSourcePrefix": "拖入:{name}",
+
+  /* ---- 引导示例内容(创建时经 t() 取当前语言,创建后即用户数据)---- */
+  "sample.title": "示例:代码审查助手",
+  "sample.body": "请审查以下代码变更:{{diff}}\n\n重点关注:{{关注点}}\n\n输出:问题清单、改进建议、是否可合并。",
+  "sample.source": "引导示例",
+  "sample.tag": "示例",
   "toast.importReadFailed": "无法读取该文件",
   "toast.importEmpty": "文件中没有可导入的记录",
   "toast.importParseFailed": "文件解析失败,请确认是 Prompt Vault 导出的 JSON",
@@ -78,6 +87,17 @@ export const zhCN = {
   "toast.exportOk": "导出成功",
   "toast.restoreOk": "已从 .bak 备份恢复",
   "toast.restoreFailed": "恢复失败:{msg}",
+
+  /* ---- 原生对话框标题(api 层,调用方传入)---- */
+  "dialog.saveDataFile": "选择 Prompt 数据文件保存位置",
+  "dialog.exportFile": "导出 Prompt 收藏",
+  "dialog.importFile": "导入 Prompt 收藏",
+
+  /* ---- 宿主注入错误(host.ts,随当前语言抛出;Rust 侧错误原文透传不翻译)---- */
+  "host.errNoEntry": "未找到当前版本的 main.js(插件文件缺失)",
+  "host.errScript": "插件脚本执行出错:{msg}",
+  "host.errTimeout": "加载超时:插件 3 秒内未调用任何 pv.* 注册",
+  "host.errBadStateJson": "plugins.json 结构不正确",
 
   /* ---- 命令面板命令与分组(分组名是身份,展示经 groupLabel 映射)---- */
   "palette.group.favorites": "收藏",
@@ -261,6 +281,8 @@ export const zhCN = {
   "qp.footerEdit": "Tab 编辑",
   "qp.footerClose": "Esc 关闭",
   "qp.copied": "已复制",
+  "qp.copiedCount": "已复制 {n} 次",
+  "qp.neverCopied": "尚未复制过",
   "qp.variablesFilled": "{n} 个变量已填充",
   "qp.copyFailed": "复制失败",
 
@@ -274,7 +296,9 @@ export const zhCN = {
   "onboard.step2Desc": "正文里写 {{变量}},复制前会弹窗填空,同名变量只填一次。",
   "onboard.createSample": "创建示例",
   "onboard.step3Title": "随叫随到",
-  "onboard.step3Desc": "按 {hotkey} 可在任意界面唤起快速拾取,输入几个字,Enter 直接复制。",
+  /** 第三步句子被 kbd 元素打断,拆为前后半句(非拼接造句:整句仍由两段完整语义组成) */
+  "onboard.step3Prefix": "按",
+  "onboard.step3Suffix": "可在任意界面唤起快速拾取,输入几个字,Enter 直接复制。",
   "onboard.skip": "跳过引导",
 
   /* ---- 自绘标题栏 ---- */
@@ -307,7 +331,10 @@ export const zhCN = {
   "ph.urlPlaceholder": "仓库主页地址,如 https://github.com/owner/repo",
   "ph.addSource": "添加",
   "ph.providerAuto": "自动识别",
+  "ph.providerGitea": "Gitea(自建)",
   "ph.providerTitle": "平台类型;非 GitHub/Gitee/GitLab 官方域名的仓库请手动选择",
+  "ph.setActiveSource": "设为生效源(同一时刻仅一个生效)",
+  "ph.badSourceUrl": "插件源地址无法解析,应为仓库主页地址",
   "ph.emptySources": "还没有插件源。添加一个仓库主页地址(仓库根需有 pv-plugins.json)。",
   "ph.sourceBranchSuffix": " · 分支 {branch}",
   "ph.noActiveSource": "尚未激活插件源:请先在「插件源」中添加并激活一个源",

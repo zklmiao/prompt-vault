@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import { getHotkeys, setHotkeys } from "../api";
 import { isComposingEvent, formatHotkey } from "../util";
+import { useI18n } from "../i18n";
 
 interface Props {
   onClose: () => void;
@@ -48,6 +49,7 @@ function HotkeyField({
   onChange: (hotkey: string) => void;
   onError: (error: string | null) => void;
 }) {
+  const { t } = useI18n();
   const [capturing, setCapturing] = useState(false);
 
   return (
@@ -55,7 +57,7 @@ function HotkeyField({
       <span className="hotkey-label">{label}</span>
       <input
         className={"hotkey-input" + (capturing ? " capturing" : "")}
-        value={capturing ? "按下组合键…" : formatHotkey(value)}
+        value={capturing ? t("settings.capture") : formatHotkey(value)}
         readOnly
         onClick={() => {
           setCapturing(true);
@@ -89,12 +91,12 @@ function HotkeyField({
           }
           const token = keyToken(e);
           if (!token) {
-            onError("不支持的按键,请用字母 / 数字 / F1-F24 / Space / 方向键");
+            onError(t("settings.badKey"));
             return;
           }
           const mods = modifiersOf(e);
           if (mods.length === 0) {
-            onError("请包含至少一个修饰键(Ctrl / Alt / Shift / Win)");
+            onError(t("settings.needModifier"));
             return;
           }
           onChange([...mods, token].join("+"));
@@ -106,7 +108,35 @@ function HotkeyField({
   );
 }
 
+/** 界面语言选项:跟随系统 / 内置两种 / 检测到的语言包码(去重,展示语言码原文) */
+function LanguageRow() {
+  const { t, langPref, setLang, providedLangs } = useI18n();
+  return (
+    <div className="hotkey-row">
+      <span className="hotkey-label">{t("settings.langSection")}</span>
+      <select
+        className="settings-lang-select"
+        value={langPref}
+        onChange={(e) => setLang(e.target.value)}
+        aria-label={t("settings.langSection")}
+      >
+        <option value="auto">{t("settings.langAuto")}</option>
+        <option value="zh-CN">{t("settings.langZh")}</option>
+        <option value="en">{t("settings.langEn")}</option>
+        {providedLangs
+          .filter((code) => code !== "zh-CN" && code !== "en")
+          .map((code) => (
+            <option key={code} value={code}>
+              {code}
+            </option>
+          ))}
+      </select>
+    </div>
+  );
+}
+
 export default function SettingsModal({ onClose, showToast }: Props) {
+  const { t } = useI18n();
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [quickpick, setQuickpick] = useState(DEFAULTS.quickpick);
@@ -138,11 +168,11 @@ export default function SettingsModal({ onClose, showToast }: Props) {
   const save = async (qp: string, cn: string) => {
     setError(null);
     if (!available) {
-      setError("当前环境(浏览器预览)不支持修改热键,请在打包版中使用。");
+      setError(t("settings.browserNotice"));
       return;
     }
     if (qp === cn) {
-      setError("两个功能不能使用同一组合键");
+      setError(t("settings.sameKeys"));
       return;
     }
     setSaving(true);
@@ -150,9 +180,9 @@ export default function SettingsModal({ onClose, showToast }: Props) {
       await setHotkeys(qp, cn);
       setQuickpick(qp);
       setClipboardNew(cn);
-      showToast("热键已更新,立即生效");
+      showToast(t("settings.toastSaved"));
     } catch (e) {
-      setError(String(e) || "保存失败");
+      setError(String(e) || t("settings.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -165,37 +195,35 @@ export default function SettingsModal({ onClose, showToast }: Props) {
   };
 
   return (
-    <Modal title="设置" onCancel={onClose}>
-      <p className="modal-hint">
-        全局热键在任意应用中都生效;修改后立即生效,无需重启。
-      </p>
+    <Modal title={t("settings.title")} onCancel={onClose}>
+      <p className="modal-hint">{t("settings.hint")}</p>
       {!available && (
-        <div className="settings-error">
-          当前环境(浏览器预览)不支持修改热键,请在打包版中使用。
-        </div>
+        <div className="settings-error">{t("settings.browserNotice")}</div>
       )}
 
       <div className="settings-section">
-        <div className="settings-heading">全局快捷键</div>
+        <div className="settings-heading">{t("settings.hotkeysSection")}</div>
         <HotkeyField
-          label="快速拾取"
+          label={t("settings.quickpick")}
           value={quickpick}
           onChange={setQuickpick}
           onError={setError}
         />
         <HotkeyField
-          label="剪贴板新建"
+          label={t("settings.clipboardNew")}
           value={clipboardNew}
           onChange={setClipboardNew}
           onError={setError}
         />
-        <div className="hotkey-tip">
-          点击输入框后按下组合键录制;必须包含 Ctrl / Alt / Shift / Win;Esc
-          取消录制。
-        </div>
+        <div className="hotkey-tip">{t("settings.hotkeyTip")}</div>
       </div>
 
-      {loading && <div className="settings-note">读取当前配置…</div>}
+      {/* 语言行不依赖 Tauri:浏览器预览(热键区 available=false)下也必须可用 */}
+      <div className="settings-section">
+        <LanguageRow />
+      </div>
+
+      {loading && <div className="settings-note">{t("settings.readingConfig")}</div>}
       {error && <div className="settings-error">{error}</div>}
 
       <div className="settings-actions">
@@ -204,18 +232,18 @@ export default function SettingsModal({ onClose, showToast }: Props) {
           onClick={restoreDefaults}
           disabled={!available || saving || loading}
         >
-          恢复默认
+          {t("settings.restoreDefaults")}
         </button>
         <div className="settings-actions-right">
           <button className="btn" onClick={onClose}>
-            关闭
+            {t("settings.close")}
           </button>
           <button
             className="btn primary"
             onClick={() => void save(quickpick, clipboardNew)}
             disabled={!available || saving || loading}
           >
-            {saving ? "保存中…" : "保存"}
+            {saving ? t("settings.saving") : t("settings.save")}
           </button>
         </div>
       </div>

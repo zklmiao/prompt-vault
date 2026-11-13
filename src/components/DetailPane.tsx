@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Draft, Mode, NewPrefill, PromptItem } from "../types";
 import { extractPlaceholders, formatDate, isComposingEvent } from "../util";
+import { useI18n } from "../i18n";
 import TagInput from "./TagInput";
 import TagChips from "./TagChips";
 import BodyText from "./BodyText";
@@ -46,6 +47,11 @@ function draftFrom(item: PromptItem | null, prefill: NewPrefill | null): Draft {
   };
 }
 
+/** 元信息行:各段独立成键,空段剔除后用「 · 」连接(与原拼接输出逐字一致) */
+function joinMeta(parts: string[]): string {
+  return parts.filter((p) => p !== "").join(" · ");
+}
+
 export default function DetailPane({
   item,
   mode,
@@ -65,14 +71,16 @@ export default function DetailPane({
   prefillSeq,
   onboarding,
 }: Props) {
+  const { t } = useI18n();
+
   if (mode.kind === "new") {
     const heading = !prefill
-      ? "新建 Prompt"
-      : prefill.source?.startsWith("拖入:")
-        ? "从拖入文件新建"
-        : prefill.source === "引导示例"
-          ? "创建示例 Prompt"
-          : "从剪贴板新建";
+      ? t("editor.headingNew")
+      : prefill.kind === "drop"
+        ? t("editor.headingNewFromDrop")
+        : prefill.kind === "sample"
+          ? t("editor.headingNewFromSample")
+          : t("editor.headingNewFromClipboard");
     return (
       <Editor
         key={`new-${prefillSeq}`}
@@ -89,7 +97,7 @@ export default function DetailPane({
     return (
       <Editor
         key={`edit-${mode.id}`}
-        heading="编辑 Prompt"
+        heading={t("editor.headingEdit")}
         initial={draftFrom(target, null)}
         allTags={allTags}
         onSave={onSave}
@@ -110,18 +118,18 @@ export default function DetailPane({
     }
     const title = trashOpen
       ? hasItems
-        ? "在左侧选择一条收藏查看详情"
-        : "回收站是空的"
+        ? t("detail.emptyTitleHasItems")
+        : t("detail.emptyTitleTrashEmpty")
       : hasItems
-        ? "在左侧选择一条收藏查看详情"
-        : "还没有收藏";
+        ? t("detail.emptyTitleHasItems")
+        : t("detail.emptyTitleNoItems");
     const hint = trashOpen
       ? hasItems
-        ? "点击左侧条目可查看、恢复或彻底删除。"
-        : "删除的收藏会先放进这里,可随时恢复。"
+        ? t("detail.emptyHintTrashHasItems")
+        : t("detail.emptyHintTrashEmpty")
       : hasItems
-        ? "Ctrl+F 搜索,或点击左侧列表选择。"
-        : "把好用的 prompt 存进来,随时搜索、一键复制。";
+        ? t("detail.emptyHintHasItems")
+        : t("detail.emptyHintNoItems");
     return (
       <section className="detail">
         <div className="detail-inner empty-state">
@@ -179,7 +187,7 @@ export default function DetailPane({
         <div className="detail-head">
           <h2 className="detail-title">
             {!trashOpen && item.pinned && <span className="star">★ </span>}
-            {item.title || "未命名"}
+            {item.title || t("common.untitled")}
           </h2>
           {!trashOpen && (
             <button
@@ -187,7 +195,7 @@ export default function DetailPane({
               onClick={() => void onTogglePin(item)}
             >
               <IconPin size={13} />
-              {item.pinned ? "已置顶" : "置顶"}
+              {item.pinned ? t("detail.unpin") : t("detail.pin")}
             </button>
           )}
         </div>
@@ -198,18 +206,18 @@ export default function DetailPane({
           </div>
         )}
         {phCount > 0 && (
-          <span className="ph-badge">{phCount} 个变量</span>
+          <span className="ph-badge">{t("detail.varCount", { n: phCount })}</span>
         )}
 
         {item.source && (
           <div className="detail-line">
-            <span className="label">来源</span>
+            <span className="label">{t("common.source")}</span>
             <span className="value"> {item.source}</span>
           </div>
         )}
         {item.note && (
           <div className="detail-line">
-            <span className="label">备注</span>
+            <span className="label">{t("common.note")}</span>
             <span className="value"> {item.note}</span>
           </div>
         )}
@@ -222,37 +230,43 @@ export default function DetailPane({
           {isTrash ? (
             <>
               <button className="btn primary" onClick={() => void onRestore(item)}>
-                <IconUndo size={15} /> 恢复
+                <IconUndo size={15} /> {t("detail.restore")}
               </button>
               <button className="btn danger" onClick={() => onPurge(item)}>
-                <IconTrash size={15} /> 彻底删除
+                <IconTrash size={15} /> {t("detail.purge")}
               </button>
               <button className="btn" onClick={() => void onCopy(item)}>
-                <IconCopy size={15} /> 复制
+                <IconCopy size={15} /> {t("common.copy")}
               </button>
             </>
           ) : (
             <>
               <button className="btn primary" onClick={() => void onCopy(item)}>
-                <IconCopy size={15} /> 复制
+                <IconCopy size={15} /> {t("common.copy")}
               </button>
               <button className="btn" onClick={onEdit}>
-                <IconEdit size={15} /> 编辑
+                <IconEdit size={15} /> {t("detail.edit")}
               </button>
               <button className="btn" onClick={() => onDelete(item)}>
-                <IconTrash size={15} /> 删除
+                <IconTrash size={15} /> {t("detail.delete")}
               </button>
             </>
           )}
         </div>
 
         <div className="meta">
-          {(item.copyCount ?? 0) > 0
-            ? `已复制 ${item.copyCount} 次 · 最近复制 ${formatDate(item.lastCopiedAt)} · `
-            : ""}
-          {isTrash
-            ? `删除于 ${formatDate(item.deletedAt)} · 更新于 ${formatDate(item.updatedAt)}`
-            : `创建于 ${formatDate(item.createdAt)} · 更新于 ${formatDate(item.updatedAt)}`}
+          {joinMeta([
+            (item.copyCount ?? 0) > 0
+              ? t("detail.metaCopied", { n: item.copyCount ?? 0 })
+              : "",
+            (item.copyCount ?? 0) > 0
+              ? t("detail.metaLastCopy", { date: formatDate(item.lastCopiedAt) })
+              : "",
+            isTrash
+              ? t("detail.metaDeletedAt", { date: formatDate(item.deletedAt) })
+              : t("detail.metaCreatedAt", { date: formatDate(item.createdAt) }),
+            t("detail.metaUpdatedAt", { date: formatDate(item.updatedAt) }),
+          ])}
         </div>
       </div>
     </section>
@@ -272,6 +286,7 @@ function Editor({
   onSave: (draft: Draft) => void | Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<Draft>(initial);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
@@ -280,7 +295,7 @@ function Editor({
   const save = () => {
     const finalDraft: Draft = {
       ...draft,
-      title: draft.title.trim() || "未命名",
+      title: draft.title.trim() || t("common.untitled"),
     };
     void onSave(finalDraft);
   };
@@ -302,18 +317,18 @@ function Editor({
         <h2 className="detail-title">{heading}</h2>
 
         <label className="field">
-          <span className="label">标题</span>
+          <span className="label">{t("editor.titleLabel")}</span>
           <input
             autoFocus
             value={draft.title}
             onChange={(e) => set("title", e.target.value)}
-            placeholder="给这条 prompt 起个名字"
+            placeholder={t("editor.titlePlaceholder")}
             onKeyDown={ctrlEnter}
           />
         </label>
 
         <div className="field">
-          <span className="label">标签(回车添加)</span>
+          <span className="label">{t("editor.tagsLabel")}</span>
           <TagInput
             value={draft.tags}
             onChange={(tags) => set("tags", tags)}
@@ -322,47 +337,47 @@ function Editor({
         </div>
 
         <label className="field">
-          <span className="label">来源(可选)</span>
+          <span className="label">{t("editor.sourceLabel")}</span>
           <input
             value={draft.source}
             onChange={(e) => set("source", e.target.value)}
-            placeholder="从哪里来的,比如某篇文章 / 某个工具"
+            placeholder={t("editor.sourcePlaceholder")}
           />
         </label>
 
         <label className="field">
-          <span className="label">备注(可选)</span>
+          <span className="label">{t("editor.noteLabel")}</span>
           <textarea
             rows={2}
             value={draft.note}
             onChange={(e) => set("note", e.target.value)}
-            placeholder="适用场景、使用心得等"
+            placeholder={t("editor.notePlaceholder")}
           />
         </label>
 
         <div className="field grow">
           <span className="label">
-            正文
+            {t("editor.bodyLabel")}
             {phCount > 0 && (
-              <span className="ph-badge inline">{phCount} 个变量</span>
+              <span className="ph-badge inline">{t("detail.varCount", { n: phCount })}</span>
             )}
-            <span className="label-hint">支持 {"{{变量名}}"} 占位符,复制时可填空</span>
+            <span className="label-hint">{t("editor.bodyHint")}</span>
           </span>
           <textarea
             className="mono"
             value={draft.body}
             onChange={(e) => set("body", e.target.value)}
-            placeholder="把 prompt 正文粘贴到这里…&#10;例如:请审查以下代码变更:{{diff}},重点关注 {{关注点}}。"
+            placeholder={t("editor.bodyPlaceholder")}
             onKeyDown={ctrlEnter}
           />
         </div>
 
         <div className="detail-actions">
           <button className="btn primary" onClick={save}>
-            保存 (Ctrl+Enter)
+            {t("editor.save")}
           </button>
           <button className="btn" onClick={onCancel}>
-            取消
+            {t("common.cancel")}
           </button>
         </div>
       </div>

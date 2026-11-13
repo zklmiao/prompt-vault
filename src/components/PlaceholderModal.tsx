@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Modal from "./Modal";
 import { isComposingEvent } from "../util";
+import { useI18n } from "../i18n";
 
 interface Props {
   names: string[];
@@ -15,6 +16,7 @@ export default function PlaceholderModal({
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useI18n();
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const n of names) init[n] = initialValues?.[n] ?? "";
@@ -25,10 +27,10 @@ export default function PlaceholderModal({
     initialValues && names.some((n) => (initialValues[n] ?? "") !== "");
 
   return (
-    <Modal title="填写变量后复制" onCancel={onCancel}>
+    <Modal title={t("fill.title")} onCancel={onCancel}>
       <p className="modal-hint">
-        检测到 {names.length} 个占位符;留空的变量将保持原样复制。
-        {hasPrefill && "已预填上次的填写值。"}
+        {t("fill.hint", { n: names.length })}
+        {hasPrefill && t("fill.prefilled")}
       </p>
       {names.map((n, i) => (
         <label key={n} className="field">
@@ -49,10 +51,10 @@ export default function PlaceholderModal({
       ))}
       <div className="modal-actions">
         <button className="btn" onClick={onCancel}>
-          取消
+          {t("common.cancel")}
         </button>
         <button className="btn primary" onClick={() => void onConfirm(values)}>
-          复制
+          {t("fill.copy")}
         </button>
       </div>
     </Modal>
