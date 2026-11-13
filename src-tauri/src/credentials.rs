@@ -73,25 +73,36 @@ fn validate_scope(scope: &str) -> Result<(), String> {
     }
 }
 
-/// 凭据写入(设置面板录入各家 Key 时直调;main-only:插件窗口整体挡在门外)
+/// 凭据写入(设置面板录入各家 Key 时直调;main-only:插件窗口整体挡在门外)。
+/// async 命令:调用者与 scope 纯内存校验留在外层,keyring IO 进阻塞池,
+/// 不冻结主窗口事件循环。
 #[tauri::command]
-pub fn plugin_credential_set(
+pub async fn plugin_credential_set(
     window: tauri::WebviewWindow,
     scope: String,
     secret: String,
 ) -> Result<(), String> {
     crate::plugins::ensure_caller_main(window.label())?;
-    credential_set_with(&SystemKeyring, &scope, &secret)
+    // scope 预校验:与 credential_set_with 的首检同一函数,失败立即返回不进阻塞池
+    validate_scope(&scope)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        credential_set_with(&SystemKeyring, &scope, &secret)
+    })
+    .await
+    .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
-/// 凭据删除(main-only)
+/// 凭据删除(main-only)。async 命令:调用者与 scope 校验留在外层,keyring IO 进阻塞池。
 #[tauri::command]
-pub fn plugin_credential_delete(
+pub async fn plugin_credential_delete(
     window: tauri::WebviewWindow,
     scope: String,
 ) -> Result<(), String> {
     crate::plugins::ensure_caller_main(window.label())?;
-    credential_delete_with(&SystemKeyring, &scope)
+    validate_scope(&scope)?;
+    tauri::async_runtime::spawn_blocking(move || credential_delete_with(&SystemKeyring, &scope))
+        .await
+        .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
 /// scope 凭据是否已配置(设置面板/插件面板展示「已配置」用):
@@ -100,15 +111,21 @@ pub fn plugin_credential_delete(
 /// self-or-main 的退化形:参数是 scope 而无 plugin_id,逐字比对以调用者
 /// 自身 label 剥前缀的 id 进行 —— 任意插件窗口可查存在性布尔(前端桥已
 /// fail-closed 限定自身 manifest 的 scope),非 main/插件窗口一律拒绝。
+/// async 命令:调用者与 scope 校验留在外层,keyring IO 进阻塞池。
 #[tauri::command]
-pub fn plugin_credential_configured(
+pub async fn plugin_credential_configured(
     window: tauri::WebviewWindow,
     scope: String,
 ) -> Result<bool, String> {
     let label = window.label();
     let self_id = label.strip_prefix(crate::plugins::PLUGIN_WINDOW_PREFIX).unwrap_or("");
     crate::plugins::ensure_caller_self_or_main(label, self_id)?;
-    credential_configured_with(&SystemKeyring, &scope, &crate::net::real_env)
+    validate_scope(&scope)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        credential_configured_with(&SystemKeyring, &scope, &crate::net::real_env)
+    })
+    .await
+    .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
 /// 命令体抽成 store + getenv 参数形式,单测可注入内存 mock 与假环境

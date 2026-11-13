@@ -458,15 +458,21 @@ pub(crate) fn credential_env_configured_with(
 
 /// 插件网络代理命令。返回 HTTP status 与响应体(任何状态码都算成功返回);
 /// 仅安全校验失败或传输层错误时返回 Err。
+/// async 命令:调用者与 URL 纯内存校验留在外层立即返回;磁盘白名单/DNS/keyring/
+/// HTTP 等阻塞 IO 整体进阻塞池,不冻结调用方窗口事件循环。
 #[tauri::command]
-pub fn plugin_net_fetch(
+pub async fn plugin_net_fetch(
     window: tauri::WebviewWindow,
     plugin_id: String,
     url: String,
     opts: Option<NetFetchOpts>,
 ) -> Result<NetResponse, String> {
     crate::plugins::ensure_caller_self_or_main(window.label(), &plugin_id)?;
-    plugin_net_fetch_with(plugin_id, url, opts)
+    // 参数预校验:与 plugin_net_fetch_with 的首检同一函数,失败立即返回不进阻塞池
+    validate_url(&url)?;
+    tauri::async_runtime::spawn_blocking(move || plugin_net_fetch_with(plugin_id, url, opts))
+        .await
+        .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
 /// 命令体(调用者校验后执行;与签名解耦)

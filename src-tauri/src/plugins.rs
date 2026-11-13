@@ -1034,9 +1034,11 @@ pub(crate) fn ensure_caller_self_or_main(
 
 /* ---------- 命令 ---------- */
 
-/// 拉取激活源的插件清单(host 仅 gitea 平台使用;四平台 ref 回退见 refs_to_try)
+/// 拉取激活源的插件清单(host 仅 gitea 平台使用;四平台 ref 回退见 refs_to_try)。
+/// async 命令:调用者校验留在外层;ref 推导/URL/SSRF 校验、DNS、HTTP、清单解析
+/// 全链整体进阻塞池,不冻结主窗口事件循环。
 #[tauri::command]
-pub fn plugin_fetch_source(
+pub async fn plugin_fetch_source(
     window: tauri::WebviewWindow,
     provider: String,
     owner: String,
@@ -1045,7 +1047,11 @@ pub fn plugin_fetch_source(
     host: Option<String>,
 ) -> Result<SourceManifest, String> {
     ensure_caller_main(window.label())?;
-    plugin_fetch_source_with(provider, owner, repo, branch, host)
+    tauri::async_runtime::spawn_blocking(move || {
+        plugin_fetch_source_with(provider, owner, repo, branch, host)
+    })
+    .await
+    .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
 /// 命令体(调用者校验后执行;与签名解耦便于单测)
@@ -1081,8 +1087,10 @@ fn plugin_fetch_source_with(
 
 /// 安装/更新插件:下载 → sha256 → 解压 → 校验 → 落盘 → 更新 plugins.json。
 /// expect_* 四参数来自市场清单条目,zip 内 manifest 必须与之逐字一致。
+/// async 命令:调用者校验留在外层;通道/参数校验与 DNS、HTTP、解压、写盘全链
+/// 整体进阻塞池,不冻结主窗口事件循环。
 #[tauri::command]
-pub fn plugin_install(
+pub async fn plugin_install(
     window: tauri::WebviewWindow,
     url: String,
     sha256: String,
@@ -1091,7 +1099,11 @@ pub fn plugin_install(
     expect_version: String,
 ) -> Result<Value, String> {
     ensure_caller_main(window.label())?;
-    plugin_install_with(url, sha256, channel, expect_id, expect_version)
+    tauri::async_runtime::spawn_blocking(move || {
+        plugin_install_with(url, sha256, channel, expect_id, expect_version)
+    })
+    .await
+    .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
 /// 命令体(调用者校验后执行)
