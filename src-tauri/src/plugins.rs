@@ -4,7 +4,8 @@
 //! - 仓库源清单拉取 `plugin_fetch_source`:四平台 raw URL 推导 + ref 回退
 //!   (显式分支 → main → master),URL 校验与 SSRF 防护复用 net.rs;
 //! - 安装 `plugin_install`:下载缓存 → sha256 校验(不符删缓存)→ zip-slip
-//!   防护解压(拒 `..`/绝对路径/软链)→ manifest 校验(id/version/minAppVersion)
+//!   防护解压(拒 `..`/绝对路径/软链;解压限额:单条目 8MB/累计 64MB/条目数 512,
+//!   防高压缩比 zip 炸弹写满磁盘)→ manifest 校验(id/version/minAppVersion)
 //!   → 版本化落盘 `plugins\store\<id>\<版本>\` + current 指针 → 更新 plugins.json;
 //! - 卸载 `plugin_uninstall`:删 store/data 目录 + 更新 plugins.json(幂等);
 //! - plugins.json 读写 `plugin_read_state` / `plugin_write_state`:
@@ -28,7 +29,7 @@
 //! 与插件 net 白名单无关(市场源 URL 是宿主行为,非插件行为);不涉及任何凭据。
 
 use std::collections::BTreeMap;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -41,6 +42,12 @@ const HTTP_TIMEOUT_SECS: u64 = 15;
 const MAX_MANIFEST_BYTES: usize = 2 * 1024 * 1024;
 /// 插件包下载上限 2MB(v1 插件 = JS + 数据文件,与清单同限)
 const MAX_PACKAGE_BYTES: usize = 2 * 1024 * 1024;
+/// 解压单条目上限 8MB(下载体积上限只约束压缩包,deflate 千倍膨胀可写满磁盘)
+const MAX_ENTRY_UNCOMPRESSED_BYTES: usize = 8 * 1024 * 1024;
+/// 解压累计上限 64MB(全部条目解压后的总字节数)
+const MAX_TOTAL_UNCOMPRESSED_BYTES: usize = 64 * 1024 * 1024;
+/// 插件包条目数上限(防海量小文件条目)
+const MAX_ZIP_ENTRIES: usize = 512;
 /// 沙箱 KV 单值上限 64KB
 const KV_VALUE_MAX_BYTES: usize = 64 * 1024;
 /// 插件窗口 label 前缀(capabilities 里以 pv-plugin-* 通配覆盖)
@@ -716,11 +723,21 @@ fn entry_names<R: Read + std::io::Seek>(
 }
 
 /// 解压到 dest(已做包结构判定 + 逐条目 zip-slip 防护 + 软链拒绝)。
+/// 解压限额防 zip 炸弹:条目数 ≤ MAX_ZIP_ENTRIES、单条目解压 ≤
+/// MAX_ENTRY_UNCOMPRESSED_BYTES、累计 ≤ MAX_TOTAL_UNCOMPRESSED_BYTES;
+/// 全部流式边读边计,任一超限立即 Err(不先解压后检查),超限字节不落盘。
 /// 任何条目失败即整体失败,由调用方清理半成品目录。
 fn extract_plugin_zip(zip_bytes: &[u8], dest: &Path) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
         .map_err(|e| format!("插件包不是有效的 zip:{e}"))?;
+    if archive.len() > MAX_ZIP_ENTRIES {
+        return Err(format!(
+            "插件包条目数({})超过上限 {MAX_ZIP_ENTRIES},已拒绝解压",
+            archive.len()
+        ));
+    }
     let prefix = detect_package_layout(&entry_names(&mut archive)?)?;
+    let mut total_uncompressed: usize = 0;
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
@@ -748,7 +765,32 @@ fn extract_plugin_zip(zip_bytes: &[u8], dest: &Path) -> Result<(), String> {
         }
         let mut out = std::fs::File::create(&out_path)
             .map_err(|e| format!("写入插件文件失败:{e}"))?;
-        std::io::copy(&mut file, &mut out).map_err(|e| format!("解压条目失败:{e}"))?;
+        // 流式限额拷贝:分块边读边计,单条目/累计任一超限立即拒绝,
+        // 超出的那一块不写入(而非解压完再检查)
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut entry_uncompressed: usize = 0;
+        loop {
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| format!("解压条目失败:{e}"))?;
+            if n == 0 {
+                break;
+            }
+            entry_uncompressed += n;
+            if entry_uncompressed > MAX_ENTRY_UNCOMPRESSED_BYTES {
+                return Err(format!(
+                    "插件包单条目解压体积超过 8MB 上限,已拒绝:{name}"
+                ));
+            }
+            total_uncompressed += n;
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES {
+                return Err(format!(
+                    "插件包累计解压体积超过 64MB 上限,已拒绝(条目:{name})"
+                ));
+            }
+            out.write_all(&buf[..n])
+                .map_err(|e| format!("解压条目失败:{e}"))?;
+        }
     }
     Ok(())
 }
@@ -1571,7 +1613,6 @@ pub(crate) mod contract_sample {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     fn temp_root(tag: &str) -> PluginRoot {
         let dir = std::env::temp_dir().join(format!(
@@ -1913,6 +1954,70 @@ mod tests {
             !root.0.join("evil.txt").exists(),
             "穿越目标不应被写出"
         );
+    }
+
+    /* ---- zip 炸弹加固:解压限额(单条目/累计/条目数,流式边读边计) ---- */
+
+    /// 高压缩比 payload:全零字节 deflate 后极小,解压即膨胀
+    fn zeros(len: usize) -> Vec<u8> {
+        vec![0u8; len]
+    }
+
+    #[test]
+    fn extract_rejects_single_entry_over_uncompressed_limit() {
+        let root = temp_root("zip-bomb-entry");
+        // 9MB 单条目(超 8MB 上限):压缩包本身很小,通过下载体积检查,
+        // 解压侧必须按实际膨胀字节数拒绝
+        let zip_bytes = make_zip(
+            &[
+                ("manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("assets/big.bin", &zeros(9 * 1024 * 1024)),
+            ],
+            &[],
+        );
+        assert!(
+            zip_bytes.len() < MAX_PACKAGE_BYTES,
+            "夹具压缩包应小于下载体积上限(否则夹具失去意义)"
+        );
+        let err = extract_plugin_zip(&zip_bytes, &root.0).unwrap_err();
+        assert!(err.contains("单条目"), "应报单条目超限:{err}");
+        assert!(err.contains("8MB"), "应报 8MB 限额:{err}");
+    }
+
+    #[test]
+    fn extract_rejects_cumulative_over_uncompressed_limit() {
+        let root = temp_root("zip-bomb-total");
+        // 14 × 5MB = 70MB:每条目均低于单条目 8MB 上限,累计超 64MB 拒绝
+        let chunk = zeros(5 * 1024 * 1024);
+        let names: Vec<String> = (0..14).map(|i| format!("assets/part{i:02}.bin")).collect();
+        let mut entries: Vec<(&str, &[u8])> = vec![("manifest.json", GOOD_MANIFEST.as_bytes())];
+        for name in &names {
+            entries.push((name.as_str(), &chunk));
+        }
+        let zip_bytes = make_zip(&entries, &[]);
+        let err = extract_plugin_zip(&zip_bytes, &root.0).unwrap_err();
+        assert!(err.contains("累计"), "应报累计超限:{err}");
+        assert!(err.contains("64MB"), "应报 64MB 限额:{err}");
+    }
+
+    #[test]
+    fn extract_rejects_entry_count_over_limit() {
+        let root = temp_root("zip-bomb-count");
+        // manifest + 513 个填充条目 = 514 > 512 上限;单条目体积极小,不触体积限额
+        let names: Vec<String> = (0..513).map(|i| format!("assets/f{i:03}.txt")).collect();
+        let mut entries: Vec<(&str, &[u8])> = vec![("manifest.json", GOOD_MANIFEST.as_bytes())];
+        for name in &names {
+            entries.push((name.as_str(), "x".as_bytes()));
+        }
+        let zip_bytes = make_zip(&entries, &[]);
+        // temp_root 只构造路径;先建目录,便于断言「无任何文件写出」
+        std::fs::create_dir_all(&root.0).unwrap();
+        let err = extract_plugin_zip(&zip_bytes, &root.0).unwrap_err();
+        assert!(err.contains("条目数"), "应报条目数超限:{err}");
+        assert!(err.contains("512"), "应报 512 限额:{err}");
+        // 计数超限在解压任何文件前拒绝,dest 内不应有内容
+        let wrote: Vec<_> = std::fs::read_dir(&root.0).unwrap().collect();
+        assert!(wrote.is_empty(), "条目数超限不应写出任何文件");
     }
 
     /* ---- 安装成功路径(双包结构)与失败路径 ---- */
