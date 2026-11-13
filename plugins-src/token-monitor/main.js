@@ -464,7 +464,7 @@
     style.id = 'pv-tm-style';
     style.textContent = [
       '.pv-tm-wrap{position:relative;width:100%;height:100%;}',
-      '.pv-tm-ball{position:absolute;left:4px;top:4px;width:76px;height:76px;',
+      '.pv-tm-ball{position:absolute;left:50%;top:4px;width:76px;height:76px;margin-left:-38px;',
         'background:transparent;border:none;padding:0;cursor:pointer;display:block;}',
       '.pv-tm-ball svg{display:block;}',
       '.pv-tm-abbr{font-size:15px;font-weight:600;fill:var(--text);}',
@@ -525,8 +525,33 @@
     });
     var ball = tmEl('button', 'pv-tm-ball');
     ball.type = 'button';
-    // drag-region 脚本豁免 button 类元素(TitleBar 先例):左键轮换、右键菜单
-    ball.addEventListener('click', rotateProvider);
+    // 点击/拖动分区(§5.2):球是 <button>,原生 drag-region 脚本豁免按钮元素,
+    // 按球拖不动(冒烟实测)——球体自实现分区:mousedown 记录起点,mousemove
+    // 超过 6px 即启动系统拖动(plugin:window|start_dragging,拖动终点位置由
+    // Rust Moved 防抖独占落盘),未超阈值的松开视为左键轮换。
+    // 衬垫(wrap 空白区)仍走原生 data-tauri-drag-region 拖动。
+    var dragState = null;
+    ball.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return; // 右键走 contextmenu 菜单
+      dragState = { x: e.screenX, y: e.screenY, moved: false };
+    });
+    window.addEventListener('mousemove', function (e) {
+      if (!dragState || dragState.moved) return;
+      var dx = e.screenX - dragState.x;
+      var dy = e.screenY - dragState.y;
+      if (dx * dx + dy * dy > 36) {
+        dragState.moved = true;
+        try {
+          // 自定义命令不经 capability 校验(冒烟实测 core 权限面差异会让拖动静默失效)
+          void window.__TAURI_INTERNALS__.invoke('plugin_start_drag', { pluginId: pv.pluginId });
+        } catch (err) { /* 纯浏览器预览无 Tauri:忽略 */ }
+      }
+    });
+    ball.addEventListener('mouseup', function () {
+      var wasClick = dragState !== null && !dragState.moved;
+      dragState = null;
+      if (wasClick) rotateProvider();
+    });
     wrap.appendChild(ball);
     var menu = tmEl('div', 'pv-tm-menu');
     menu.hidden = true;
@@ -702,15 +727,17 @@
   // ---------- 右键菜单(自注入样式见 ensureTmStyles;失焦即收起) ----------
 
   /** 菜单展开需扩窗:84×84 窗口装不下 6 项菜单(webview 内容裁剪),
-   *  经 pv.window.resize 临时扩窗,收起恢复 84×84(实现决策,见开工卡偏差) */
+   *  经 pv.window.resize 临时扩窗,收起恢复 84×84(实现决策,见开工卡偏差)。
+   *  注意:菜单项经 configured() 异步填充,必须等填充完成再测高,
+   *  否则按空菜单(≈10px)扩窗会把大部分条目裁在窗口外(冒烟实测) */
   function openTmMenu(wrap) {
     var menu = wrap.querySelector('.pv-tm-menu');
     if (!menu) return;
-    buildTmMenu(menu);
     menu.hidden = false;
-    var h = menu.getBoundingClientRect().height;
-    void pv.window.resize(MENU_WIDTH + 8, BALL_SIZE + h + 6)
-      .catch(function () { /* 无窗口(纯浏览器预览)时忽略:菜单照常展示 */ });
+    buildTmMenu(menu).then(function () {
+      var h = menu.getBoundingClientRect().height;
+      return pv.window.resize(MENU_WIDTH + 8, BALL_SIZE + h + 6);
+    }).catch(function () { /* 无窗口(纯浏览器预览)时忽略:菜单照常展示 */ });
   }
 
   function closeTmMenu(wrap) {
@@ -720,12 +747,12 @@
     void pv.window.resize(BALL_SIZE, BALL_SIZE).catch(function () {});
   }
 
-  /** 菜单内容:直选供应商(✓ 当前)+ 立即刷新 + 打开详情面板 + 隐藏 */
+  /** 菜单内容:直选供应商(✓ 当前)+ 立即刷新 + 打开详情面板 + 隐藏;
+   *  返回填充完成 Promise(供扩窗前测量) */
   function buildTmMenu(menu) {
     menu.innerHTML = '';
-    var configuredList = [];
-    pv.credentials.configured().then(function (list) {
-      configuredList = Array.isArray(list) ? list : [];
+    return pv.credentials.configured().then(function (list) {
+      var configuredList = Array.isArray(list) ? list : [];
       for (var i = 0; i < configuredList.length; i++) {
         (function (p) {
           var meta = window.pvTokenMonitor.meta[p];

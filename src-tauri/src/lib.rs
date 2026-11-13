@@ -611,6 +611,7 @@ pub fn run() {
             plugins::plugin_open_window,
             plugins::plugin_close_window,
             plugins::plugin_resize_window,
+            plugins::plugin_start_drag,
             plugins::plugin_show_main_panel,
             i18n::i18n_locales,
             i18n::i18n_locale_file

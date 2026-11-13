@@ -1177,10 +1177,13 @@ pub fn plugin_installed_manifest(plugin_id: String) -> Result<Option<Value>, Str
 
 /// 打开插件专属窗口(label = pv-plugin-<id>;已存在则唤起)。
 /// 尺寸由宿主传入(来自插件 pv.window.setup 声明),缺省 320×240;
-/// x/y 为记忆位置(物理像素,Rust 拖动防抖写入 kv),有值则先 set_position 后 show
-/// 防闪跳;无值维持主窗内偏移的缺省定位。
+/// x/y 为记忆位置(物理像素,Rust 拖动防抖写入 kv),有值则换算为逻辑像素
+/// 经 builder.position 直接可见定位创建 —— 与"先 set_position 后 show"等效防闪跳。
+/// 必须是 async 命令:Tauri v2 在 Windows 上同步命令里创建窗口会死锁
+/// (webview 创建需等待事件循环,而同步命令正占用主线程;官方文档明确要求),
+/// async 命令在运行时线程执行,事件循环保持空闲可完成 webview 初始化。
 #[tauri::command]
-pub fn plugin_open_window(
+pub async fn plugin_open_window(
     app: tauri::AppHandle,
     plugin_id: String,
     width: Option<f64>,
@@ -1214,30 +1217,31 @@ pub fn plugin_open_window(
     .skip_taskbar(true)
     .resizable(false)
     .shadow(false)
-    .inner_size(width, height)
-    // 隐藏构建:定位完成后再 show,记忆位置路径不闪跳
-    .visible(false);
-    if x.is_none() || y.is_none() {
-        // 缺省定位:尽力跟随主窗口居中,失败用系统默认位置
-        if let Some(main) = app.get_webview_window(crate::MAIN_LABEL) {
-            if let (Ok(pos), Ok(size)) = (main.outer_position(), main.inner_size()) {
-                let scale = main.scale_factor().unwrap_or(1.0);
-                let x = pos.x as f64 + (size.width as f64 / scale - width) / 2.0;
-                let y = pos.y as f64 + (size.height as f64 / scale - height) / 2.0;
-                builder = builder.position(x.max(0.0), y.max(0.0));
+    .inner_size(width, height);
+    match (x, y) {
+        (Some(px), Some(py)) => {
+            // 记忆位置(物理像素)→ 逻辑像素(按主窗缩放,兜底 1.0)
+            let scale = app
+                .get_webview_window(crate::MAIN_LABEL)
+                .and_then(|m| m.scale_factor().ok())
+                .unwrap_or(1.0);
+            builder = builder.position(px as f64 / scale, py as f64 / scale);
+        }
+        _ => {
+            // 缺省定位:尽力跟随主窗口居中,失败用系统默认位置
+            if let Some(main) = app.get_webview_window(crate::MAIN_LABEL) {
+                if let (Ok(pos), Ok(size)) = (main.outer_position(), main.inner_size()) {
+                    let scale = main.scale_factor().unwrap_or(1.0);
+                    let x = pos.x as f64 + (size.width as f64 / scale - width) / 2.0;
+                    let y = pos.y as f64 + (size.height as f64 / scale - height) / 2.0;
+                    builder = builder.position(x.max(0.0), y.max(0.0));
+                }
             }
         }
     }
     builder
         .build()
         .map_err(|e| format!("创建插件窗口失败:{e}"))?;
-    if let Some(window) = app.get_webview_window(&label) {
-        if let (Some(px), Some(py)) = (x, y) {
-            let _ = window.set_position(tauri::PhysicalPosition::new(px, py));
-        }
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
     Ok(())
 }
 
@@ -1260,6 +1264,22 @@ pub fn plugin_resize_window(
     window
         .set_size(tauri::LogicalSize::new(width, height))
         .map_err(|e| format!("调整插件窗口尺寸失败:{e}"))
+}
+
+/// 启动球窗系统拖动循环(必须处于鼠标按下状态,由插件 mousemove 阈值分支调用)。
+/// 走自定义命令而非 core:window|start_dragging:自定义命令不经 capability 校验,
+/// 避免 core 权限面差异导致拖动静默失效(冒烟实测);拖动终点位置仍由
+/// Moved 防抖独占落盘,架构上位置写入权在 Rust 不变。
+#[tauri::command]
+pub fn plugin_start_drag(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
+    ensure_plugin_id(&plugin_id)?;
+    let label = format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}");
+    let Some(window) = app.get_webview_window(&label) else {
+        return Err("插件窗口不存在".to_string());
+    };
+    window
+        .start_dragging()
+        .map_err(|e| format!("启动拖动失败:{e}"))
 }
 
 /// 球窗唤出主窗口并激活本插件详情面板:show main → emit pv-open-plugin-panel
