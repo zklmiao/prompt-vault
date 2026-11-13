@@ -18,7 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# protocol-asset:插件 JS 经 convertFileSrc 注入所需(asset 协议 + 运行时 scope 扩展)
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-single-instance = "2"
@@ -36,6 +37,8 @@ ureq = { version = "2", default-features = false, features = ["tls", "native-cer
 # 火山方舟 V4 请求签名
 hmac = "0.12"
 url = "2"
+# 插件包解压(default-features=false,仅 deflate;zip-slip 防护与软链检测在本仓库内实现)
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

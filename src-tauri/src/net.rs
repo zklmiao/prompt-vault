@@ -54,8 +54,9 @@ pub struct NetResponse {
 
 // ---------- URL 与 scheme 白名单 ----------
 
-/// URL 解析 + scheme 白名单;解析结果供后续白名单/SSRF/签名步骤复用
-fn validate_url(input: &str) -> Result<Url, String> {
+/// URL 解析 + scheme 白名单;解析结果供后续白名单/SSRF/签名步骤复用。
+/// 同时供 plugins.rs 的安装管线复用(拉清单/下 zip 的 URL 前置校验)。
+pub(crate) fn validate_url(input: &str) -> Result<Url, String> {
     let parsed = Url::parse(input).map_err(|_| "URL 无法解析".to_string())?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("仅允许 http/https 请求".to_string());
@@ -146,8 +147,9 @@ pub(crate) fn is_forbidden_ip(ip: &IpAddr) -> bool {
 }
 
 /// SSRF 校验:IP 字面量直接判定;域名解析后全部 A/AAAA 记录逐一判定,
-/// 任何一条命中即整体拒绝(必须全放行才放行)
-fn assert_public_target(url: &Url) -> Result<(), String> {
+/// 任何一条命中即整体拒绝(必须全放行才放行)。
+/// 同时供 plugins.rs 的安装管线复用(源/插件包 URL 的 SSRF 前置校验)。
+pub(crate) fn assert_public_target(url: &Url) -> Result<(), String> {
     match url.host() {
         None => Err("URL 缺少主机名".to_string()),
         Some(Host::Ipv4(ip)) if is_forbidden_v4(ip) => Err(SSRF_REJECT_MSG.to_string()),
@@ -687,6 +689,19 @@ mod tests {
         assert!(credential_allowed(&perms, "glm"));
         assert!(!credential_allowed(&perms, "volcengine"), "快照里没声明");
         assert!(!credential_allowed(&perms, "anything-else"));
+    }
+
+    /// 契约样例(与 plugins.rs 写端、mcp/mod.rs 读端共用同一份 JSON):
+    /// 安装器写入的 permissions 快照必须被本模块读端原样识别
+    #[test]
+    fn contract_sample_permissions_readable() {
+        let perms = extract_permissions(crate::plugins::contract_sample::PLUGINS_JSON, "token-monitor")
+            .unwrap_or_else(|e| panic!("契约样例应能提取 permissions:{e}"));
+        assert_eq!(perms.len(), 5);
+        assert!(host_allowed(&perms, "open.bigmodel.cn"));
+        assert!(host_allowed(&perms, "opencode.ai"));
+        assert!(!host_allowed(&perms, "evil.com"));
+        assert!(credential_allowed(&perms, "glm"));
     }
 
     // ---------- 凭据解析(环境变量优先 → 凭据管理器兜底) ----------

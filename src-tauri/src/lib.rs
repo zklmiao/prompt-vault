@@ -18,6 +18,7 @@ mod data_watch;
 mod fuzzy;
 mod mcp;
 mod net;
+mod plugins;
 
 /// `--mcp` headless 入口:stdio JSON-RPC MCP Server。
 /// 不走 tauri Builder,不建窗口/托盘/单实例,由 CLI 客户端按需拉起。
@@ -27,7 +28,7 @@ pub fn run_mcp() {
 
 /// 首次启动时建议的数据文件位置(按共识默认指向工程内 data 目录)
 const DEFAULT_DATA_PATH: &str = r"E:\Agent\Proj\prompt-vault\data\prompts.json";
-const MAIN_LABEL: &str = "main";
+pub(crate) const MAIN_LABEL: &str = "main";
 const QUICKPICK_LABEL: &str = "quickpick";
 const QUICKPICK_WIDTH: f64 = 900.0;
 const QUICKPICK_HEIGHT: f64 = 480.0;
@@ -377,7 +378,8 @@ pub(crate) fn now_iso_utc() -> String {
 /// 原子写入实现:目录 → .bak 备份 → 临时文件 sync → 原地替换。
 /// 全程持跨进程命名互斥(键 = 数据路径哈希),与 MCP headless 的 save_prompt
 /// 串行化;同线程重入(save_prompt 外层已持锁)由 Win32 互斥体递归计数保证安全。
-fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
+/// plugins.json / kv.json 等插件状态文件同样复用本实现(plugins.rs)。
+pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
     data_lock::with_data_lock(path, || {
         let p = PathBuf::from(path);
         if let Some(parent) = p.parent() {
@@ -594,7 +596,18 @@ pub fn run() {
             win_close,
             credentials::plugin_credential_set,
             credentials::plugin_credential_delete,
-            net::plugin_net_fetch
+            net::plugin_net_fetch,
+            plugins::plugin_fetch_source,
+            plugins::plugin_install,
+            plugins::plugin_uninstall,
+            plugins::plugin_read_state,
+            plugins::plugin_write_state,
+            plugins::plugin_kv_get,
+            plugins::plugin_kv_set,
+            plugins::plugin_entry_path,
+            plugins::plugin_installed_manifest,
+            plugins::plugin_open_window,
+            plugins::plugin_close_window
         ])
         .setup(move |app| {
             // 恢复上次记住的主窗口位置与大小
@@ -610,6 +623,13 @@ pub fn run() {
             if let Some(dp) = cfg.data_path.clone() {
                 data_watch::start(app.handle(), PathBuf::from(dp));
             }
+
+            // 插件 JS 加载通道:把 plugins 目录加入 asset 协议允许范围(运行时扩展)。
+            // tauri.conf.json 仅开启 assetProtocol,scope 留默认空;插件 main.js 经
+            // convertFileSrc 注入主窗口/插件窗口,不给全局可读范围。
+            let _ = app
+                .asset_protocol_scope()
+                .allow_directory(plugins::plugins_root(), true);
 
             // 注册全局快捷键:配置优先,解析/注册失败回退默认并自愈配置
             #[cfg(desktop)]

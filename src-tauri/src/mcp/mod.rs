@@ -501,6 +501,14 @@ mod tests {
         assert!(!is_mcp_enabled(std::fs::read_to_string(&missing).ok().as_deref()));
     }
 
+    /// 契约样例(与 plugins.rs 写端、net.rs 读端共用同一份 JSON):
+    /// 安装器写入的完整状态不应干扰本模块对 mcp.enabled 的读取
+    #[test]
+    fn contract_sample_mcp_gate_read() {
+        // 样例里 mcp.enabled = false → 未启用
+        assert!(!is_mcp_enabled(Some(crate::plugins::contract_sample::PLUGINS_JSON)));
+    }
+
     /* ---- JSON-RPC 解析与响应形状 ---- */
 
     #[test]

@@ -1,0 +1,1828 @@
+//! 插件安装管线与宿主状态存储(插件系统批次1)。
+//!
+//! 职责(见 docs/plugin-system-design.md §2/§3/§4 与开工卡 A/B 节):
+//! - 仓库源清单拉取 `plugin_fetch_source`:四平台 raw URL 推导 + ref 回退
+//!   (显式分支 → main → master),URL 校验与 SSRF 防护复用 net.rs;
+//! - 安装 `plugin_install`:下载缓存 → sha256 校验(不符删缓存)→ zip-slip
+//!   防护解压(拒 `..`/绝对路径/软链)→ manifest 校验(id/version/minAppVersion)
+//!   → 版本化落盘 `plugins\store\<id>\<版本>\` + current 指针 → 更新 plugins.json;
+//! - 卸载 `plugin_uninstall`:删 store/data 目录 + 更新 plugins.json(幂等);
+//! - plugins.json 读写 `plugin_read_state` / `plugin_write_state`:
+//!   字符串透传 + Rust 端 serde 校验,写盘复用 write_atomic;
+//! - 插件沙箱 KV `plugin_kv_get` / `plugin_kv_set`:`plugins\data\<id>\kv.json`;
+//! - 插件窗口 `plugin_open_window` / `plugin_close_window`:
+//!   ui:"window" 插件的专属无边框置顶窗口(label = pv-plugin-<id>);
+//! - 注入辅助 `plugin_entry_path` / `plugin_installed_manifest`:
+//!   主窗口按 enabled 顺序注入 main.js 前解析当前版本目录与包内 manifest。
+//!
+//! 存储布局(%APPDATA%\prompt-vault\):
+//!   plugins.json                 —— 宿主状态(契约见开工卡 B,读端已存在于 net.rs/mcp)
+//!   plugins\store\<id>\current   —— 纯文本指针,内容为当前版本目录名(原子写切换)
+//!   plugins\store\<id>\<版本>\    —— 已解压插件包;更新保留上一版本作回滚点
+//!   plugins\cache\<sha256>.zip   —— 下载缓存(sha256 不符即删)
+//!   plugins\data\<id>\kv.json    —— 插件沙箱 KV
+//!
+//! 安全边界:本模块所有 URL 请求(拉清单/下 zip)仅 http/https,请求前过
+//! net.rs 的 validate_url + assert_public_target(SSRF),不跟随重定向,响应体限长;
+//! 与插件 net 白名单无关(市场源 URL 是宿主行为,非插件行为);不涉及任何凭据。
+
+use std::collections::BTreeMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde_json::{Value, json};
+use tauri::Manager;
+
+/// HTTP 整体超时(与 net.rs 保持一致)
+const HTTP_TIMEOUT_SECS: u64 = 15;
+/// 仓库清单响应体上限 2MB
+const MAX_MANIFEST_BYTES: usize = 2 * 1024 * 1024;
+/// 插件包下载上限 2MB(v1 插件 = JS + 数据文件,与清单同限)
+const MAX_PACKAGE_BYTES: usize = 2 * 1024 * 1024;
+/// 沙箱 KV 单值上限 64KB
+const KV_VALUE_MAX_BYTES: usize = 64 * 1024;
+/// 插件窗口 label 前缀(capabilities 里以 pv-plugin-* 通配覆盖)
+pub(crate) const PLUGIN_WINDOW_PREFIX: &str = "pv-plugin-";
+
+/* ---------- 插件 id 与路径 ---------- */
+
+/// 插件 id 合法性:kebab-case(`^[a-z0-9][a-z0-9-]{0,63}$` 的宽松等价,
+/// 不允许空串/大写/下划线/空白;首尾连字符拒绝,防止路径拼接歧义)。
+/// 所有以 id 参与拼路径的命令都必须先过这里,防目录穿越。
+fn plugin_id_valid(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && !id.starts_with('-')
+        && !id.ends_with('-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+fn ensure_plugin_id(id: &str) -> Result<(), String> {
+    if plugin_id_valid(id) {
+        Ok(())
+    } else {
+        Err("插件 id 不合法:应为小写字母、数字和连字符组成的 kebab-case".to_string())
+    }
+}
+
+/// plugins.json 与 config.json 同目录(契约 B;读端 net.rs/mcp 同此推导)
+fn plugins_file_path() -> PathBuf {
+    crate::config_file_path().with_file_name("plugins.json")
+}
+
+/// 插件存储根目录:%APPDATA%\prompt-vault\plugins(setup 里加入 asset 协议范围)
+pub(crate) fn plugins_root() -> PathBuf {
+    crate::config_file_path()
+        .with_file_name("plugins")
+}
+
+struct PluginRoot(PathBuf);
+
+impl PluginRoot {
+    /// 命令路径使用真实根目录;测试直接构造临时根目录
+    fn discover() -> Self {
+        Self(plugins_root())
+    }
+
+    fn store_dir(&self, id: &str) -> PathBuf {
+        self.0.join("store").join(id)
+    }
+
+    fn cache_dir(&self) -> PathBuf {
+        self.0.join("cache")
+    }
+
+    fn data_dir(&self, id: &str) -> PathBuf {
+        self.0.join("data").join(id)
+    }
+
+    /// current 指针内容 = 当前版本目录名(无换行,原子写切换)
+    fn current_version(&self, id: &str) -> Option<String> {
+        std::fs::read_to_string(self.store_dir(id).join("current"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn set_current_version(&self, id: &str, version: &str) -> Result<(), String> {
+        crate::write_atomic(&self.store_dir(id).join("current"), version)
+    }
+
+    /// 解析当前版本目录;指针缺失/指向不存在时返回 None
+    fn resolve_version_dir(&self, id: &str) -> Option<PathBuf> {
+        let version = self.current_version(id)?;
+        let dir = self.store_dir(id).join(version);
+        dir.is_dir().then_some(dir)
+    }
+}
+
+/* ---------- 版本比较(手写最小 semver,含 pre-release 排序) ---------- */
+
+#[derive(Debug, PartialEq, Eq)]
+enum PreId {
+    Num(u64),
+    Text(String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SemVer {
+    major: u64,
+    minor: u64,
+    patch: u64,
+    pre: Vec<PreId>,
+}
+
+/// 解析 `major.minor.patch[-pre]`;构建元数据(`+…`)忽略;非法输入返回 None
+fn parse_semver(input: &str) -> Option<SemVer> {
+    let s = input.trim();
+    let (core, pre) = match s.split_once('-') {
+        Some((c, p)) => (c, Some(p)),
+        None => (s, None),
+    };
+    let core = core.split_once('+').map_or(core, |(c, _)| c);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let mut ids = Vec::new();
+    if let Some(p) = pre {
+        let p = p.split_once('+').map_or(p, |(x, _)| x);
+        if p.is_empty() {
+            return None;
+        }
+        for ident in p.split('.') {
+            if ident.is_empty() {
+                return None;
+            }
+            if ident.bytes().all(|b| b.is_ascii_digit()) {
+                ids.push(PreId::Num(ident.parse().ok()?));
+            } else if ident
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            {
+                ids.push(PreId::Text(ident.to_string()));
+            } else {
+                return None;
+            }
+        }
+    }
+    Some(SemVer {
+        major,
+        minor,
+        patch,
+        pre: ids,
+    })
+}
+
+/// semver 优先级:核心三元组逐位比较;pre-release 优先级低于正式版;
+/// pre 标识符逐项比较,数字 < 字母数字,同类按数值/字典序;前缀相同则少标识符更低
+fn compare_semver(a: &SemVer, b: &SemVer) -> std::cmp::Ordering {
+    let core = a
+        .major
+        .cmp(&b.major)
+        .then(a.minor.cmp(&b.minor))
+        .then(a.patch.cmp(&b.patch));
+    if core != std::cmp::Ordering::Equal {
+        return core;
+    }
+    match (a.pre.is_empty(), b.pre.is_empty()) {
+        (true, true) => std::cmp::Ordering::Equal,
+        (true, false) => std::cmp::Ordering::Greater,
+        (false, true) => std::cmp::Ordering::Less,
+        (false, false) => {
+            for (x, y) in a.pre.iter().zip(b.pre.iter()) {
+                let c = match (x, y) {
+                    (PreId::Num(m), PreId::Num(n)) => m.cmp(n),
+                    (PreId::Num(_), PreId::Text(_)) => std::cmp::Ordering::Less,
+                    (PreId::Text(_), PreId::Num(_)) => std::cmp::Ordering::Greater,
+                    (PreId::Text(m), PreId::Text(n)) => m.cmp(n),
+                };
+                if c != std::cmp::Ordering::Equal {
+                    return c;
+                }
+            }
+            a.pre.len().cmp(&b.pre.len())
+        }
+    }
+}
+
+/// minAppVersion 门:应用版本 >= 插件要求版本时放行。
+/// 任一侧无法解析视为不满足(保守拒绝,报错信息会带具体要求)。
+fn app_meets_min_version(min_required: &str, app_version: &str) -> bool {
+    match (parse_semver(min_required), parse_semver(app_version)) {
+        (Some(min), Some(app)) => compare_semver(&app, &min) != std::cmp::Ordering::Less,
+        _ => false,
+    }
+}
+
+/* ---------- 源 raw URL 推导(四平台) ---------- */
+
+/// ref 序列:显式分支优先,否则先 main 再 master
+fn refs_to_try(branch: Option<&str>) -> Vec<String> {
+    match branch.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(b) => vec![b.to_string()],
+        None => vec!["main".to_string(), "master".to_string()],
+    }
+}
+
+/// 仓库路径段(owner/repo)校验:字母数字与 ._-,拒绝 . .. 与分隔符
+fn validate_repo_segment(s: &str, what: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() || s.len() > 100 {
+        return Err(format!("{what} 长度不合法"));
+    }
+    if s == "." || s == ".." {
+        return Err(format!("{what} 不合法"));
+    }
+    if !s
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(format!("{what} 含不支持的字符"));
+    }
+    Ok(())
+}
+
+/// git ref 校验:拒绝空白、URL 特殊字符与路径穿越形状
+fn validate_git_ref(git_ref: &str) -> Result<(), String> {
+    if git_ref.is_empty() || git_ref.len() > 128 {
+        return Err("分支名长度不合法".to_string());
+    }
+    let bad = git_ref.chars().any(|c| {
+        c.is_whitespace() || matches!(c, '?' | '#' | '%' | '\\' | '\'' | '"') || c.is_control()
+    }) || git_ref.starts_with('/')
+        || git_ref.contains("..");
+    if bad {
+        return Err("分支名含不支持的字符".to_string());
+    }
+    Ok(())
+}
+
+/// gitea 自建主机校验:仅 host[:port] 形状,拒绝 scheme/路径/凭据字符
+fn validate_gitea_host(host: &str) -> Result<(), String> {
+    let host = host.trim();
+    if host.is_empty() || host.len() > 253 {
+        return Err("gitea 主机地址长度不合法".to_string());
+    }
+    if host.contains("://") || host.contains('/') || host.contains('\\') || host.contains('@') {
+        return Err("gitea 主机地址只需填域名(可选端口),不要带协议或路径".to_string());
+    }
+    let (label, port) = match host.split_once(':') {
+        Some((l, p)) => (l, Some(p)),
+        None => (host, None),
+    };
+    if label.is_empty() || label.contains("..") {
+        return Err("gitea 主机地址不合法".to_string());
+    }
+    if !label
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+    {
+        return Err("gitea 主机地址含不支持的字符".to_string());
+    }
+    if let Some(p) = port {
+        if p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("gitea 端口不合法".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 四平台 raw 清单 URL 推导(设计 §3.1;gitea 为自建域名,须过 SSRF 校验)
+fn source_raw_url(
+    provider: &str,
+    owner: &str,
+    repo: &str,
+    host: Option<&str>,
+    git_ref: &str,
+) -> Result<String, String> {
+    let owner = owner.trim();
+    let repo = repo.trim();
+    validate_repo_segment(owner, "owner")?;
+    validate_repo_segment(repo, "repo")?;
+    validate_git_ref(git_ref)?;
+    match provider {
+        "github" => Ok(format!(
+            "https://raw.githubusercontent.com/{owner}/{repo}/{git_ref}/pv-plugins.json"
+        )),
+        "gitee" => Ok(format!(
+            "https://gitee.com/{owner}/{repo}/raw/{git_ref}/pv-plugins.json"
+        )),
+        "gitlab" => Ok(format!(
+            "https://gitlab.com/{owner}/{repo}/-/raw/{git_ref}/pv-plugins.json"
+        )),
+        "gitea" => {
+            let h = host
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "gitea 源需要提供主机地址".to_string())?;
+            validate_gitea_host(h)?;
+            Ok(format!("https://{h}/{owner}/{repo}/raw/{git_ref}/pv-plugins.json"))
+        }
+        other => Err(format!("不支持的平台类型:{other}")),
+    }
+}
+
+/* ---------- HTTP 下载(清单与插件包共用) ---------- */
+
+enum FetchFail {
+    NotFound,
+    Other(String),
+}
+
+/// GET 指定 URL:15s 超时、不跟随重定向、响应体限长(404 单独区分供 ref 回退)
+fn http_get_bytes(url: &url::Url, cap: usize) -> Result<Vec<u8>, FetchFail> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .redirects(0)
+        .build();
+    let response = match agent.get(url.as_str()).call() {
+        Ok(resp) => resp,
+        Err(ureq::Error::Status(404, _)) => return Err(FetchFail::NotFound),
+        Err(ureq::Error::Status(status, _)) => {
+            return Err(FetchFail::Other(format!("HTTP {status}")));
+        }
+        Err(e) => return Err(FetchFail::Other(format!("网络请求失败:{e}"))),
+    };
+    let mut reader = response.into_reader().take((cap + 1) as u64);
+    let mut buf = Vec::new();
+    reader
+        .read_to_end(&mut buf)
+        .map_err(|e| FetchFail::Other(format!("读取响应失败:{e}")))?;
+    if buf.len() > cap {
+        return Err(FetchFail::Other("响应体超过大小上限".to_string()));
+    }
+    Ok(buf)
+}
+
+/* ---------- 仓库清单防御式解析 ---------- */
+
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChannelRef {
+    pub(crate) version: String,
+    pub(crate) url: String,
+    pub(crate) sha256: String,
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MarketEntry {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) desc: String,
+    pub(crate) release: Option<ChannelRef>,
+    pub(crate) beta: Option<ChannelRef>,
+    pub(crate) min_app_version: Option<String>,
+    pub(crate) permissions: Vec<String>,
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub(crate) struct SourceManifest {
+    pub(crate) name: String,
+    pub(crate) plugins: Vec<MarketEntry>,
+}
+
+fn parse_channel_ref(v: &Value) -> Option<ChannelRef> {
+    let version = v.get("version")?.as_str()?.trim();
+    let url = v.get("url")?.as_str()?.trim();
+    let sha256 = v.get("sha256")?.as_str()?.trim();
+    if version.is_empty() || url.is_empty() || sha256.is_empty() {
+        return None;
+    }
+    // 此处只做 scheme 前缀初筛;真正下载时会走 validate_url + SSRF 全量校验
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    Some(ChannelRef {
+        version: version.to_string(),
+        url: url.to_string(),
+        sha256: sha256.to_lowercase(),
+    })
+}
+
+/// 单个市场条目解析;任何必需字段缺失/非法即整个条目跳过(坏条目不拖垮清单)
+fn parse_market_entry(v: &Value) -> Option<MarketEntry> {
+    let id = v.get("id")?.as_str()?.trim();
+    if !plugin_id_valid(id) {
+        return None;
+    }
+    let name = v.get("name")?.as_str()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let desc = v
+        .get("desc")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let channels = v.get("channels")?;
+    let release = channels.get("release").and_then(parse_channel_ref);
+    let beta = channels.get("beta").and_then(parse_channel_ref);
+    if release.is_none() && beta.is_none() {
+        return None;
+    }
+    let min_app_version = v
+        .get("minAppVersion")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    let permissions = v
+        .get("permissions")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| p.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(MarketEntry {
+        id: id.to_string(),
+        name: name.to_string(),
+        desc,
+        release,
+        beta,
+        min_app_version,
+        permissions,
+    })
+}
+
+/// 清单防御式解析:整体非 JSON / 缺 plugins 数组 → Err;坏条目逐条跳过
+fn parse_source_manifest(raw: &str) -> Result<SourceManifest, String> {
+    let value: Value = serde_json::from_str(raw)
+        .map_err(|_| "插件清单不是有效的 JSON".to_string())?;
+    let arr = value
+        .get("plugins")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "插件清单缺少 plugins 数组".to_string())?;
+    let name = value
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let plugins: Vec<MarketEntry> = arr.iter().filter_map(parse_market_entry).collect();
+    Ok(SourceManifest { name, plugins })
+}
+
+/* ---------- plugins.json 契约(写端校验) ---------- */
+
+// 以下结构仅供写端校验字段形状(字段本身不读取),allow(dead_code) 消除未读告警
+
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpSection {
+    #[serde(default)]
+    enabled: bool,
+}
+
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceConfig {
+    id: String,
+    #[serde(default)]
+    name: String,
+    provider: String,
+    url: String,
+    #[serde(default)]
+    branch: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstalledEntry {
+    version: String,
+    channel: String,
+    enabled: bool,
+    sha256: String,
+    installed_at: String,
+    error: Option<String>,
+    permissions: Vec<String>,
+}
+
+/// plugins.json 的写端校验结构:字段与契约 B 逐一对应。
+/// installed 条目全部字段必填(error/permissions 由安装器显式写入),
+/// version/sources/mcp 带缺省以容忍手写精简文件。
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginsState {
+    #[serde(default = "default_state_version")]
+    version: i64,
+    #[serde(default)]
+    sources: Vec<SourceConfig>,
+    #[serde(default)]
+    active_source_id: Option<String>,
+    #[serde(default)]
+    installed: BTreeMap<String, InstalledEntry>,
+    #[serde(default = "default_mcp_section")]
+    mcp: McpSection,
+}
+
+fn default_state_version() -> i64 {
+    1
+}
+
+fn default_mcp_section() -> McpSection {
+    McpSection { enabled: false }
+}
+
+fn validate_plugins_state(raw: &str) -> Result<(), String> {
+    serde_json::from_str::<PluginsState>(raw)
+        .map(|_| ())
+        .map_err(|e| format!("plugins.json 格式不正确:{e}"))
+}
+
+fn default_state_value() -> Value {
+    json!({
+        "version": 1,
+        "sources": [],
+        "activeSourceId": null,
+        "installed": {},
+        "mcp": { "enabled": false }
+    })
+}
+
+/// 从磁盘读状态(缺文件回退默认骨架,不落盘);解析失败报可读错误
+fn load_state_value() -> Result<Value, String> {
+    match std::fs::read_to_string(plugins_file_path()) {
+        Ok(raw) => serde_json::from_str(&raw).map_err(|e| format!("plugins.json 解析失败:{e}")),
+        Err(_) => Ok(default_state_value()),
+    }
+}
+
+fn save_state_value(state: &Value) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(state).map_err(|e| format!("状态序列化失败:{e}"))?;
+    crate::write_atomic(&plugins_file_path(), &json)
+}
+
+/// installed 条目写入(纯函数,单测覆盖);返回是否发生了变更
+fn set_installed_entry(state: &mut Value, id: &str, entry: Value) -> bool {
+    if !state.is_object() {
+        return false;
+    }
+    if !state
+        .get("installed")
+        .is_some_and(|v| v.is_object())
+    {
+        return false;
+    }
+    if let Some(map) = state.get_mut("installed").and_then(|v| v.as_object_mut()) {
+        map.insert(id.to_string(), entry);
+        return true;
+    }
+    false
+}
+
+/// installed 条目移除(纯函数,单测覆盖);返回是否发生了变更
+fn remove_installed_entry(state: &mut Value, id: &str) -> bool {
+    state
+        .get_mut("installed")
+        .and_then(|v| v.as_object_mut())
+        .map(|map| map.remove(id).is_some())
+        .unwrap_or(false)
+}
+
+/* ---------- sha256 ---------- */
+
+fn normalize_sha256(input: &str) -> Option<String> {
+    let s = input.trim().to_lowercase();
+    if s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Some(s)
+    } else {
+        None
+    }
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(data);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+/* ---------- zip 解包(zip-slip 防护) ---------- */
+
+/// 接受两种包结构:① 根级 manifest.json;② 单一顶层目录/<目录>/manifest.json。
+/// 返回条目名需要剥掉的目录前缀("" 或 "dir/")。
+fn detect_package_layout(names: &[String]) -> Result<String, String> {
+    if names.iter().any(|n| n == "manifest.json") {
+        return Ok(String::new());
+    }
+    let mut top_dirs: Vec<&str> = Vec::new();
+    let mut has_root_files = false;
+    for n in names {
+        match n.split_once('/') {
+            Some((dir, _)) => {
+                if !top_dirs.contains(&dir) {
+                    top_dirs.push(dir);
+                }
+            }
+            None => has_root_files = true,
+        }
+    }
+    if top_dirs.len() == 1 && !has_root_files {
+        let prefix = format!("{}/", top_dirs[0]);
+        if names
+            .iter()
+            .any(|n| n.as_str() == format!("{prefix}manifest.json"))
+        {
+            return Ok(prefix);
+        }
+        return Err("插件包内缺少 manifest.json".to_string());
+    }
+    Err("插件包结构不正确:应为根级 manifest.json 或单一顶层目录".to_string())
+}
+
+/// 相对路径安全判定:仅接受普通组件,拒绝绝对路径 / `..` / `.` / 盘符前缀 / NUL
+fn safe_rel_path(rel: &str) -> Option<PathBuf> {
+    if rel.contains('\0') {
+        return None;
+    }
+    let p = Path::new(rel);
+    if p.is_absolute() {
+        return None;
+    }
+    let all_normal = p
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    all_normal.then(|| p.to_path_buf())
+}
+
+fn entry_names<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<Vec<String>, String> {
+    (0..archive.len())
+        .map(|i| {
+            archive
+                .by_index_raw(i)
+                .map(|f| f.name().to_string())
+                .map_err(|e| format!("读取 zip 条目失败:{e}"))
+        })
+        .collect()
+}
+
+/// 解压到 dest(已做包结构判定 + 逐条目 zip-slip 防护 + 软链拒绝)。
+/// 任何条目失败即整体失败,由调用方清理半成品目录。
+fn extract_plugin_zip(zip_bytes: &[u8], dest: &Path) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
+        .map_err(|e| format!("插件包不是有效的 zip:{e}"))?;
+    let prefix = detect_package_layout(&entry_names(&mut archive)?)?;
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 zip 条目失败:{e}"))?;
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().to_string();
+        let Some(rel) = name.strip_prefix(&prefix) else {
+            return Err(format!("插件包内出现清单目录之外的条目:{name}"));
+        };
+        if rel.is_empty() {
+            continue;
+        }
+        // unix 高位标识文件类型:S_IFLNK = 0o120000,软链条目一律拒绝
+        if file.unix_mode().is_some_and(|m| m & 0o170_000 == 0o120_000) {
+            return Err(format!("插件包含软链接条目,已拒绝:{name}"));
+        }
+        let Some(rel_path) = safe_rel_path(rel) else {
+            return Err(format!("插件包内含不安全路径:{name}"));
+        };
+        let out_path = dest.join(rel_path);
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败:{e}"))?;
+        }
+        let mut out = std::fs::File::create(&out_path)
+            .map_err(|e| format!("写入插件文件失败:{e}"))?;
+        std::io::copy(&mut file, &mut out).map_err(|e| format!("解压条目失败:{e}"))?;
+    }
+    Ok(())
+}
+
+/* ---------- 安装管线核心 ---------- */
+
+/// 安装失败分类:sha256 不符需删缓存,其余错误保留缓存便于重试
+#[derive(Debug)]
+enum InstallError {
+    ShaMismatch(String),
+    Other(String),
+}
+
+#[derive(Debug)]
+struct InstallOutcome {
+    /// 契约 B 形状的 installed 条目(含 zip 内 manifest 的 permissions 快照)
+    entry: Value,
+    /// 切换前旧版本目录名(回滚点;与新版相同则无;生产路径仅测试断言读取)
+    #[allow(dead_code)]
+    old_version: Option<String>,
+}
+
+/// 从 zip 字节安装(sha 校验 → 结构判定 → manifest 校验 → 解压 → 指针切换 → 回滚清理)。
+/// downloads/网络不在此层,由命令外壳负责;plugins.json 的更新也由调用方负责,
+/// 便于在状态文件缺失/损坏时给出独立错误。
+fn install_from_bytes(
+    root: &PluginRoot,
+    zip_bytes: &[u8],
+    expect_sha256: &str,
+    channel: &str,
+    expect_id: &str,
+    expect_version: &str,
+    app_version: &str,
+    prev_enabled: Option<bool>,
+) -> Result<InstallOutcome, InstallError> {
+    ensure_plugin_id(expect_id).map_err(InstallError::Other)?;
+    if !matches!(channel, "release" | "beta") {
+        return Err(InstallError::Other("通道只能是 release 或 beta".to_string()));
+    }
+
+    // ① sha256 校验(不符即止,调用方删缓存)
+    let actual = sha256_hex(zip_bytes);
+    if actual != expect_sha256 {
+        return Err(InstallError::ShaMismatch(
+            "插件包 sha256 校验失败:下载内容与清单不一致".to_string(),
+        ));
+    }
+
+    // ② 包结构判定 + 读取 manifest.json(校验全部通过前不写任何文件)
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
+        .map_err(|e| InstallError::Other(format!("插件包不是有效的 zip:{e}")))?;
+    let names = entry_names(&mut archive).map_err(InstallError::Other)?;
+    let prefix = detect_package_layout(&names).map_err(InstallError::Other)?;
+    let manifest_name = format!("{prefix}manifest.json");
+    let manifest_idx = names
+        .iter()
+        .position(|n| n.as_str() == manifest_name)
+        .ok_or_else(|| InstallError::Other("插件包内缺少 manifest.json".to_string()))?;
+    let manifest_bytes = {
+        let mut f = archive
+            .by_index(manifest_idx)
+            .map_err(|e| InstallError::Other(format!("读取 manifest.json 失败:{e}")))?;
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf)
+            .map_err(|e| InstallError::Other(format!("读取 manifest.json 失败:{e}")))?;
+        buf
+    };
+    let manifest: Value = serde_json::from_slice(&manifest_bytes)
+        .map_err(|_| InstallError::Other("manifest.json 不是有效的 JSON".to_string()))?;
+
+    // ③ manifest 校验:id / version 与清单条目一致;minAppVersion 门
+    let manifest_id = manifest
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| InstallError::Other("manifest.json 缺少 id".to_string()))?;
+    if manifest_id != expect_id {
+        return Err(InstallError::Other(format!(
+            "插件包 id({manifest_id})与清单条目({expect_id})不一致,已拒绝安装"
+        )));
+    }
+    let manifest_version = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| InstallError::Other("manifest.json 缺少 version".to_string()))?;
+    if manifest_version != expect_version {
+        return Err(InstallError::Other(format!(
+            "插件包版本({manifest_version})与清单条目({expect_version})不一致,已拒绝安装"
+        )));
+    }
+    if let Some(min_app) = manifest.get("minAppVersion").and_then(|v| v.as_str()) {
+        if !app_meets_min_version(min_app, app_version) {
+            return Err(InstallError::Other(format!(
+                "应用版本过低:该插件要求 ≥ {min_app},当前应用版本 {app_version}"
+            )));
+        }
+    }
+    let permissions: Vec<String> = manifest
+        .get("permissions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| p.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // ④ 解压到版本目录(先清掉同版本残留,失败即删半成品)
+    let target = root.store_dir(expect_id).join(expect_version);
+    let _ = std::fs::remove_dir_all(&target);
+    if std::fs::create_dir_all(&target).is_err() {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(InstallError::Other("创建插件版本目录失败".to_string()));
+    }
+    if let Err(e) = extract_plugin_zip(zip_bytes, &target) {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(InstallError::Other(e));
+    }
+
+    // ⑤ 原子切换 current 指针,保留上一版本为回滚点,清理更旧版本
+    let old_version = root.current_version(expect_id);
+    if let Err(e) = root.set_current_version(expect_id, expect_version) {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(InstallError::Other(format!("切换插件版本失败:{e}")));
+    }
+    let mut keep = vec![expect_version];
+    if let Some(old) = &old_version {
+        if old != expect_version {
+            keep.push(old);
+        }
+    }
+    prune_versions(root, expect_id, &keep);
+
+    // ⑥ 生成契约 B 形状的 installed 条目(permissions 快照来自 zip 内 manifest)
+    let entry = json!({
+        "version": manifest_version,
+        "channel": channel,
+        "enabled": prev_enabled.unwrap_or(true),
+        "sha256": expect_sha256,
+        "installedAt": crate::now_iso_utc(),
+        "error": null,
+        "permissions": permissions,
+    });
+    Ok(InstallOutcome {
+        entry,
+        old_version,
+    })
+}
+
+/// 只保留 keep 列出的版本目录,其余版本目录(更旧的)删除;
+/// 非目录与 current 指针文件一律不动
+fn prune_versions(root: &PluginRoot, id: &str, keep: &[&str]) {
+    let Ok(entries) = std::fs::read_dir(root.store_dir(id)) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().to_string();
+        if keep.contains(&name.as_str()) {
+            continue;
+        }
+        let _ = std::fs::remove_dir_all(path);
+    }
+}
+
+/// 卸载产物清理:store/<id>/ 与 data/<id>/ 整目录删除(不存在即幂等成功)
+fn uninstall_artifacts(root: &PluginRoot, id: &str) {
+    let _ = std::fs::remove_dir_all(root.store_dir(id));
+    let _ = std::fs::remove_dir_all(root.data_dir(id));
+}
+
+/* ---------- 沙箱 KV ---------- */
+
+fn kv_read(path: &Path, key: &str) -> Result<Option<Value>, String> {
+    if key.is_empty() {
+        return Err("key 不能为空".to_string());
+    }
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(_) => return Ok(None), // 尚未写入过任何键
+    };
+    let obj: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("kv.json 解析失败:{e}"))?;
+    Ok(obj.get(key).cloned())
+}
+
+fn kv_write(path: &Path, key: &str, value: Value) -> Result<(), String> {
+    if key.is_empty() || key.len() > 128 {
+        return Err("key 长度需在 1-128 字节".to_string());
+    }
+    let encoded = serde_json::to_string(&value).map_err(|e| format!("值序列化失败:{e}"))?;
+    if encoded.len() > KV_VALUE_MAX_BYTES {
+        return Err(format!("单个键值过大(上限 {KV_VALUE_MAX_BYTES} 字节)"));
+    }
+    let mut obj: Value = match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str(&raw).map_err(|e| format!("kv.json 解析失败:{e}"))?,
+        Err(_) => json!({}),
+    };
+    let Some(map) = obj.as_object_mut() else {
+        return Err("kv.json 格式不正确:应为对象".to_string());
+    };
+    map.insert(key.to_string(), value);
+    let json = serde_json::to_string_pretty(&obj).map_err(|e| format!("kv 序列化失败:{e}"))?;
+    crate::write_atomic(path, &json)
+}
+
+/* ---------- 命令 ---------- */
+
+/// 拉取激活源的插件清单(host 仅 gitea 平台使用;四平台 ref 回退见 refs_to_try)
+#[tauri::command]
+pub fn plugin_fetch_source(
+    provider: String,
+    owner: String,
+    repo: String,
+    branch: Option<String>,
+    host: Option<String>,
+) -> Result<SourceManifest, String> {
+    for git_ref in refs_to_try(branch.as_deref()) {
+        let url = source_raw_url(
+            &provider,
+            owner.trim(),
+            repo.trim(),
+            host.as_deref(),
+            &git_ref,
+        )?;
+        let parsed = crate::net::validate_url(&url)?;
+        // 源 URL 是宿主行为(非插件联网),不做插件白名单,SSRF 校验必须过
+        crate::net::assert_public_target(&parsed)?;
+        match http_get_bytes(&parsed, MAX_MANIFEST_BYTES) {
+            Ok(bytes) => {
+                let body = String::from_utf8_lossy(&bytes).into_owned();
+                return parse_source_manifest(&body);
+            }
+            Err(FetchFail::NotFound) => continue, // 该分支无清单,试下一个 ref
+            Err(FetchFail::Other(e)) => return Err(format!("拉取插件清单失败:{e}")),
+        }
+    }
+    Err("插件清单不存在:main 与 master 分支都未找到 pv-plugins.json".to_string())
+}
+
+/// 安装/更新插件:下载 → sha256 → 解压 → 校验 → 落盘 → 更新 plugins.json。
+/// expect_* 四参数来自市场清单条目,zip 内 manifest 必须与之逐字一致。
+#[tauri::command]
+pub fn plugin_install(
+    url: String,
+    sha256: String,
+    channel: String,
+    expect_id: String,
+    expect_version: String,
+) -> Result<Value, String> {
+    if !matches!(channel.as_str(), "release" | "beta") {
+        return Err("通道只能是 release 或 beta".to_string());
+    }
+    ensure_plugin_id(&expect_id)?;
+    let expect_sha = normalize_sha256(&sha256)
+        .ok_or_else(|| "sha256 不合法:应为 64 位十六进制串".to_string())?;
+    let parsed = crate::net::validate_url(&url)?;
+    crate::net::assert_public_target(&parsed)?;
+
+    let root = PluginRoot::discover();
+    let bytes = http_get_bytes(&parsed, MAX_PACKAGE_BYTES)
+        .map_err(|e| match e {
+            FetchFail::NotFound => "插件包下载失败:HTTP 404".to_string(),
+            FetchFail::Other(m) => format!("插件包下载失败:{m}"),
+        })?;
+
+    // 先落缓存(sha256 为文件名,便于失败重试不重复下载)
+    let cache_path = root.cache_dir().join(format!("{expect_sha}.zip"));
+    std::fs::create_dir_all(root.cache_dir()).map_err(|e| format!("创建缓存目录失败:{e}"))?;
+    std::fs::write(&cache_path, &bytes).map_err(|e| format!("写入缓存失败:{e}"))?;
+
+    // 已安装条目的 enabled 状态在更新时保留(首次安装默认启用)
+    let prev_enabled = load_state_value()
+        .ok()
+        .and_then(|v| {
+            v.get("installed")?
+                .get(&expect_id)?
+                .get("enabled")?
+                .as_bool()
+        });
+
+    match install_from_bytes(
+        &root,
+        &bytes,
+        &expect_sha,
+        &channel,
+        &expect_id,
+        &expect_version,
+        env!("CARGO_PKG_VERSION"),
+        prev_enabled,
+    ) {
+        Ok(outcome) => {
+            let mut state = load_state_value()?;
+            let entry = outcome.entry.clone();
+            if !set_installed_entry(&mut state, &expect_id, outcome.entry) {
+                return Err("plugins.json 缺少 installed 对象,无法记录安装状态".to_string());
+            }
+            save_state_value(&state)?;
+            Ok(entry)
+        }
+        Err(InstallError::ShaMismatch(msg)) => {
+            let _ = std::fs::remove_file(&cache_path);
+            Err(msg)
+        }
+        Err(InstallError::Other(msg)) => Err(msg),
+    }
+}
+
+/// 卸载插件:删 store/<id>/ 与 data/<id>/,更新 plugins.json;重复调用幂等
+#[tauri::command]
+pub fn plugin_uninstall(id: String) -> Result<(), String> {
+    ensure_plugin_id(&id)?;
+    let root = PluginRoot::discover();
+    uninstall_artifacts(&root, &id);
+    // 状态文件缺失/损坏时不报错:目录已清理,残留条目由下次写状态覆盖
+    let mut state = load_state_value()?;
+    remove_installed_entry(&mut state, &id);
+    save_state_value(&state)?;
+    Ok(())
+}
+
+/// 宿主读取 plugins.json;文件缺失返回默认骨架(不落盘),损坏返回可读错误
+#[tauri::command]
+pub fn plugin_read_state() -> Result<String, String> {
+    match std::fs::read_to_string(plugins_file_path()) {
+        Ok(raw) => {
+            validate_plugins_state(&raw)?;
+            Ok(raw)
+        }
+        Err(_) => Ok(serde_json::to_string_pretty(&default_state_value())
+            .unwrap_or_else(|_| "{}".to_string())),
+    }
+}
+
+/// 宿主写入 plugins.json:字符串透传 + serde 校验,写盘复用 write_atomic
+#[tauri::command]
+pub fn plugin_write_state(json: String) -> Result<(), String> {
+    validate_plugins_state(&json)?;
+    crate::write_atomic(&plugins_file_path(), &json)
+}
+
+/// 插件沙箱 KV 读取(键不存在返回 null)
+#[tauri::command]
+pub fn plugin_kv_get(plugin_id: String, key: String) -> Result<Option<Value>, String> {
+    ensure_plugin_id(&plugin_id)?;
+    let root = PluginRoot::discover();
+    kv_read(&root.data_dir(&plugin_id).join("kv.json"), &key)
+}
+
+/// 插件沙箱 KV 写入
+#[tauri::command]
+pub fn plugin_kv_set(plugin_id: String, key: String, value: Value) -> Result<(), String> {
+    ensure_plugin_id(&plugin_id)?;
+    let root = PluginRoot::discover();
+    kv_write(
+        &root.data_dir(&plugin_id).join("kv.json"),
+        &key,
+        value,
+    )
+}
+
+/// 当前启用版本的 main.js 绝对路径(asset 协议注入用);i18n 型/未安装返回 null
+#[tauri::command]
+pub fn plugin_entry_path(plugin_id: String) -> Result<Option<String>, String> {
+    ensure_plugin_id(&plugin_id)?;
+    let root = PluginRoot::discover();
+    let path = root
+        .resolve_version_dir(&plugin_id)
+        .map(|dir| dir.join("main.js"))
+        .filter(|p| p.is_file());
+    Ok(path.map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// 已安装插件包内 manifest.json 内容(宿主展示名称/ui 形态/错误恢复用)
+#[tauri::command]
+pub fn plugin_installed_manifest(plugin_id: String) -> Result<Option<Value>, String> {
+    ensure_plugin_id(&plugin_id)?;
+    let root = PluginRoot::discover();
+    let Some(dir) = root.resolve_version_dir(&plugin_id) else {
+        return Ok(None);
+    };
+    match std::fs::read_to_string(dir.join("manifest.json")) {
+        Ok(raw) => match serde_json::from_str(&raw) {
+            Ok(v) => Ok(Some(v)),
+            Err(_) => Ok(None),
+        },
+        Err(_) => Ok(None),
+    }
+}
+
+/// 打开插件专属窗口(label = pv-plugin-<id>;已存在则唤起)。
+/// 尺寸由宿主传入(来自插件 pv.window.setup 声明),缺省 320×240。
+#[tauri::command]
+pub fn plugin_open_window(
+    app: tauri::AppHandle,
+    plugin_id: String,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
+    ensure_plugin_id(&plugin_id)?;
+    let label = format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    let title = plugin_installed_manifest(plugin_id.clone())
+        .ok()
+        .flatten()
+        .and_then(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
+        .unwrap_or_else(|| plugin_id.clone());
+    let width = width.unwrap_or(320.0);
+    let height = height.unwrap_or(240.0);
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App(format!("index.html?plugin={plugin_id}").into()),
+    )
+    .title(format!("Prompt Vault · {title}"))
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .inner_size(width, height);
+    // 尽力跟随主窗口居中,失败用系统默认位置
+    if let Some(main) = app.get_webview_window(crate::MAIN_LABEL) {
+        if let (Ok(pos), Ok(size)) = (main.outer_position(), main.inner_size()) {
+            let scale = main.scale_factor().unwrap_or(1.0);
+            let x = pos.x as f64 + (size.width as f64 / scale - width) / 2.0;
+            let y = pos.y as f64 + (size.height as f64 / scale - height) / 2.0;
+            builder = builder.position(x.max(0.0), y.max(0.0));
+        }
+    }
+    builder
+        .build()
+        .map_err(|e| format!("创建插件窗口失败:{e}"))?;
+    Ok(())
+}
+
+/// 关闭插件窗口(停用/卸载前由宿主调用;不存在则静默)
+#[tauri::command]
+pub fn plugin_close_window(app: tauri::AppHandle, plugin_id: String) {
+    if ensure_plugin_id(&plugin_id).is_ok() {
+        if let Some(w) = app.get_webview_window(&format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}")) {
+            let _ = w.close();
+        }
+    }
+}
+
+/* ---------- 测试 ---------- */
+
+/// 三方共用的 plugins.json 契约样例(开工卡 B):
+/// 本文件的写端校验(PluginsState)、net.rs 的 permissions 读端、
+/// mcp/mod.rs 的 mcp.enabled 读端,三方测试断言同一份样例。
+#[cfg(test)]
+pub(crate) mod contract_sample {
+    pub(crate) const PLUGINS_JSON: &str = r#"{
+  "version": 1,
+  "sources": [
+    {
+      "id": "official",
+      "name": "Prompt Vault 官方插件源",
+      "provider": "github",
+      "url": "https://github.com/prompt-vault/plugins",
+      "branch": null
+    }
+  ],
+  "activeSourceId": "official",
+  "installed": {
+    "token-monitor": {
+      "version": "1.0.0",
+      "channel": "release",
+      "enabled": true,
+      "sha256": "3f79bb7b435b05321651dcef1f4d0c6ea6c9a6debd7d9c4b7d1b6d5a5f5a5f5a",
+      "installedAt": "2026-11-13T08:00:00.000Z",
+      "error": null,
+      "permissions": [
+        "net:open.bigmodel.cn",
+        "net:ark.cn-beijing.volcengineapi.com",
+        "net:opencode.ai",
+        "credential:glm",
+        "window:float"
+      ]
+    }
+  },
+  "mcp": { "enabled": false }
+}"#;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    fn temp_root(tag: &str) -> PluginRoot {
+        let dir = std::env::temp_dir().join(format!(
+            "pv-plugins-test-{}-{tag}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        PluginRoot(dir)
+    }
+
+    /// 测试 zip 构造器:条目为 (name, content);symlink 条目为 (name, target)
+    fn make_zip(entries: &[(&str, &[u8])], symlinks: &[(&str, &str)]) -> Vec<u8> {
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(cursor);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, content) in entries {
+            w.start_file(*name, opts).unwrap();
+            w.write_all(content).unwrap();
+        }
+        for (name, target) in symlinks {
+            w.add_symlink(*name, *target, opts).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    const GOOD_MANIFEST: &str = r#"{
+        "id": "demo-hello",
+        "name": "演示插件",
+        "version": "1.0.0",
+        "minAppVersion": "0.1.0",
+        "type": "standard",
+        "ui": "none",
+        "permissions": ["net:example.com", "window:float"]
+    }"#;
+
+    const MANIFEST_MIN_020: &str = r#"{
+        "id": "token-monitor",
+        "name": "Coding 套餐用量监控",
+        "version": "1.0.0",
+        "minAppVersion": "0.2.0",
+        "type": "standard",
+        "ui": "window",
+        "permissions": ["net:open.bigmodel.cn"]
+    }"#;
+
+    /* ---- 源 URL 推导与 ref 回退 ---- */
+
+    #[test]
+    fn source_raw_url_covers_four_platforms() {
+        assert_eq!(
+            source_raw_url("github", "pv", "plugins", None, "main").unwrap(),
+            "https://raw.githubusercontent.com/pv/plugins/main/pv-plugins.json"
+        );
+        assert_eq!(
+            source_raw_url("gitee", "pv", "plugins", None, "dev").unwrap(),
+            "https://gitee.com/pv/plugins/raw/dev/pv-plugins.json"
+        );
+        assert_eq!(
+            source_raw_url("gitlab", "pv", "plugins", None, "main").unwrap(),
+            "https://gitlab.com/pv/plugins/-/raw/main/pv-plugins.json"
+        );
+        assert_eq!(
+            source_raw_url("gitea", "pv", "plugins", Some("git.example.com:3000"), "main")
+                .unwrap(),
+            "https://git.example.com:3000/pv/plugins/raw/main/pv-plugins.json"
+        );
+        assert!(source_raw_url("gitea", "pv", "plugins", None, "main").is_err());
+        assert!(source_raw_url("sourcehut", "pv", "plugins", None, "main").is_err());
+    }
+
+    #[test]
+    fn refs_fallback_explicit_branch_wins() {
+        assert_eq!(refs_to_try(Some("dev")), vec!["dev"]);
+        assert_eq!(refs_to_try(Some("  dev  ")), vec!["dev"]);
+        assert_eq!(refs_to_try(Some("   ")), vec!["main", "master"]);
+        assert_eq!(refs_to_try(None), vec!["main", "master"]);
+    }
+
+    #[test]
+    fn repo_segment_and_ref_validation() {
+        assert!(validate_repo_segment("prompt-vault", "owner").is_ok());
+        assert!(validate_repo_segment("a.b_c-1", "repo").is_ok());
+        for bad in ["", "..", ".", "a/b", "a b", "中文", "a+b"] {
+            assert!(
+                validate_repo_segment(bad, "owner").is_err(),
+                "「{bad}」应被拒绝"
+            );
+        }
+        assert!(validate_git_ref("release/v1").is_ok());
+        for bad in ["", "a b", "a#b", "a?b", "../x", "/abs", "%2e"] {
+            assert!(validate_git_ref(bad).is_err(), "「{bad}」应被拒绝");
+        }
+        assert!(validate_gitea_host("git.example.com").is_ok());
+        assert!(validate_gitea_host("git.example.com:3000").is_ok());
+        for bad in [
+            "",
+            "https://git.example.com",
+            "git.example.com/path",
+            "user@git.example.com",
+            "gi..t.example.com",
+            "git.example.com:",
+            "git.example.com:30a0",
+        ] {
+            assert!(validate_gitea_host(bad).is_err(), "「{bad}」应被拒绝");
+        }
+    }
+
+    /* ---- 清单防御式解析 ---- */
+
+    fn manifest_json(plugins: &str) -> String {
+        format!(r#"{{ "name": "测试源", "plugins": {plugins} }}"#)
+    }
+
+    #[test]
+    fn manifest_parses_valid_entries_and_skips_bad_ones() {
+        let raw = manifest_json(
+            r#"[
+            {
+              "id": "demo-hello", "name": "演示插件", "desc": "d",
+              "channels": {
+                "release": { "version": "1.0.0", "url": "https://x/1.0.0.zip", "sha256": "AA11" },
+                "beta": { "version": "1.1.0-beta.1", "url": "https://x/1.1.0.zip", "sha256": "bb22" }
+              },
+              "minAppVersion": "0.1.0",
+              "permissions": ["net:example.com", 42, "window:float", ""]
+            },
+            { "id": "BAD_ID", "name": "坏 id", "channels": { "release": { "version": "1", "url": "https://x", "sha256": "x" } } },
+            { "id": "no-channels", "name": "无通道" },
+            { "name": "缺 id" },
+            { "id": "empty-channel", "name": "空通道", "channels": { "release": { "version": "", "url": "https://x", "sha256": "x" } } },
+            { "id": "ftp-url", "name": "非 http 通道", "channels": { "beta": { "version": "1", "url": "ftp://x/y.zip", "sha256": "x" } } }
+        ]"#,
+        );
+        let manifest = parse_source_manifest(&raw).unwrap();
+        assert_eq!(manifest.name, "测试源");
+        assert_eq!(manifest.plugins.len(), 1, "只应保留完全合法的条目");
+        let entry = &manifest.plugins[0];
+        assert_eq!(entry.id, "demo-hello");
+        assert_eq!(entry.release.as_ref().unwrap().version, "1.0.0");
+        assert_eq!(entry.beta.as_ref().unwrap().version, "1.1.0-beta.1");
+        assert_eq!(entry.release.as_ref().unwrap().sha256, "aa11", "sha 统一小写");
+        // 非字符串与空串权限被过滤
+        assert_eq!(entry.permissions, vec!["net:example.com", "window:float"]);
+    }
+
+    #[test]
+    fn manifest_rejects_non_json_and_missing_plugins() {
+        let err = parse_source_manifest("not json").unwrap_err();
+        assert!(err.contains("JSON"), "整体非 JSON 应报可读错误:{err}");
+        assert!(parse_source_manifest(r#"{"name": "x"}"#)
+            .unwrap_err()
+            .contains("plugins"));
+    }
+
+    /* ---- semver ---- */
+
+    #[test]
+    fn semver_spec_ordering_vector() {
+        // semver.org §11 优先级示例(逐项升序)
+        let ascending = [
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-alpha.beta",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-beta.11",
+            "1.0.0-rc.1",
+            "1.0.0",
+            "1.0.1",
+            "1.1.0",
+            "2.0.0",
+        ];
+        for pair in ascending.windows(2) {
+            let a = parse_semver(pair[0]).unwrap_or_else(|| panic!("解析失败:{}", pair[0]));
+            let b = parse_semver(pair[1]).unwrap_or_else(|| panic!("解析失败:{}", pair[1]));
+            assert_eq!(
+                compare_semver(&a, &b),
+                std::cmp::Ordering::Less,
+                "{} 应小于 {}",
+                pair[0],
+                pair[1]
+            );
+            assert_eq!(compare_semver(&b, &a), std::cmp::Ordering::Greater);
+        }
+        // 数字标识符 < 字母数字标识符;构建元数据不参与比较
+        let num = parse_semver("1.0.0-2").unwrap();
+        let text = parse_semver("1.0.0-alpha").unwrap();
+        assert_eq!(compare_semver(&num, &text), std::cmp::Ordering::Less);
+        let with_build = parse_semver("1.0.0+build.1").unwrap();
+        let plain = parse_semver("1.0.0").unwrap();
+        assert_eq!(compare_semver(&with_build, &plain), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn version_gate_current_app_behaviour() {
+        // 开工卡关键事实:app 0.1.9-alpha.2,token-monitor 要求 0.2.0 → 拒绝
+        assert!(!app_meets_min_version("0.2.0", "0.1.9-alpha.2"));
+        assert!(app_meets_min_version("0.1.9-alpha.1", "0.1.9-alpha.2"));
+        // 同核心版本:正式版 > pre-release
+        assert!(!app_meets_min_version("0.1.9", "0.1.9-alpha.2"));
+        assert!(app_meets_min_version("0.1.9-alpha.2", "0.1.9-alpha.2"));
+        assert!(app_meets_min_version("0.2.0", "1.0.0"));
+        // 无法解析的版本要求 → 保守拒绝
+        assert!(!app_meets_min_version("latest", "0.1.9"));
+        assert!(!app_meets_min_version("0.2", "0.1.9"));
+    }
+
+    /* ---- 包结构判定与 zip-slip ---- */
+
+    #[test]
+    fn layout_detects_root_and_nested_packages() {
+        let root_zip = make_zip(
+            &[("manifest.json", GOOD_MANIFEST.as_bytes()), ("main.js", b"//x")],
+            &[],
+        );
+        assert_eq!(detect_package_layout(&entry_names(&mut zip::ZipArchive::new(std::io::Cursor::new(root_zip)).unwrap()).unwrap()).unwrap(), "");
+        let nested_zip = make_zip(
+            &[
+                ("demo-hello/manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("demo-hello/main.js", b"//x"),
+                ("demo-hello/assets/a.json", b"{}"),
+            ],
+            &[],
+        );
+        assert_eq!(
+            detect_package_layout(&entry_names(&mut zip::ZipArchive::new(std::io::Cursor::new(nested_zip)).unwrap()).unwrap())
+                .unwrap(),
+            "demo-hello/"
+        );
+    }
+
+    #[test]
+    fn layout_rejects_broken_packages() {
+        let cases: Vec<(String, Vec<u8>)> = vec![
+            ("没有 manifest".into(), make_zip(&[("main.js", b"//x")], &[])),
+            (
+                "两个顶层目录".into(),
+                make_zip(
+                    &[
+                        ("a/manifest.json", GOOD_MANIFEST.as_bytes()),
+                        ("b/x.js", b"//x"),
+                    ],
+                    &[],
+                ),
+            ),
+            (
+                "根文件与目录混装".into(),
+                make_zip(
+                    &[
+                        ("stray.txt", b"x"),
+                        ("a/manifest.json", GOOD_MANIFEST.as_bytes()),
+                    ],
+                    &[],
+                ),
+            ),
+            (
+                "顶层目录缺 manifest".into(),
+                make_zip(&[("a/main.js", b"//x")], &[]),
+            ),
+        ];
+        for (label, bytes) in cases {
+            let names =
+                entry_names(&mut zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap())
+                    .unwrap();
+            assert!(detect_package_layout(&names).is_err(), "{label} 应被拒绝");
+        }
+    }
+
+    #[test]
+    fn safe_rel_path_rejects_traversal_and_absolute() {
+        for bad in [
+            "../evil.txt",
+            "/abs.txt",
+            "C:/abs.txt",
+            "a/../../b.txt",
+            "./x.txt",
+            "..",
+            "a\0b",
+        ] {
+            assert!(safe_rel_path(bad).is_none(), "「{bad}」应被拒绝");
+        }
+        for ok in ["main.js", "assets/a.json", "assets/deep/b.png"] {
+            assert!(safe_rel_path(ok).is_some(), "「{ok}」应放行");
+        }
+    }
+
+    #[test]
+    fn extract_rejects_zip_slip_and_symlinks() {
+        let root = temp_root("zip-slip");
+
+        // 三类恶意条目:相对穿越 / 绝对路径 / 软链
+        let traversal = make_zip(
+            &[
+                ("manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("../evil.txt", b"pwn"),
+            ],
+            &[],
+        );
+        assert!(
+            extract_plugin_zip(&traversal, &root.0).is_err(),
+            "「../」条目应被拒绝"
+        );
+        let absolute = make_zip(
+            &[
+                ("manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("/abs/evil.txt", b"pwn"),
+            ],
+            &[],
+        );
+        assert!(
+            extract_plugin_zip(&absolute, &root.0).is_err(),
+            "绝对路径条目应被拒绝"
+        );
+        let symlink = make_zip(
+            &[("manifest.json", GOOD_MANIFEST.as_bytes())],
+            &[("link", "/etc/passwd")],
+        );
+        let err = extract_plugin_zip(&symlink, &root.0).unwrap_err();
+        assert!(err.contains("软链"), "软链条目应被拒绝:{err}");
+        // 半成品不应落到根目录之外
+        assert!(
+            !root.0.join("evil.txt").exists(),
+            "穿越目标不应被写出"
+        );
+    }
+
+    /* ---- 安装成功路径(双包结构)与失败路径 ---- */
+
+    fn sha_of(bytes: &[u8]) -> String {
+        sha256_hex(bytes)
+    }
+
+    #[test]
+    fn install_success_root_layout_writes_store_and_entry() {
+        let root = temp_root("install-root");
+        let zip_bytes = make_zip(
+            &[
+                ("manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("main.js", b"pv.panel.register({});"),
+                ("assets/a.json", b"{}"),
+            ],
+            &[],
+        );
+        let sha = sha_of(&zip_bytes);
+        let outcome = install_from_bytes(
+            &root, &zip_bytes, &sha, "release", "demo-hello", "1.0.0", "0.1.9-alpha.2", None,
+        )
+        .unwrap_or_else(|e| panic!("安装应成功:{e:?}"));
+
+        // 版本目录与文件落盘
+        let dir = root.store_dir("demo-hello").join("1.0.0");
+        assert_eq!(std::fs::read_to_string(dir.join("main.js")).unwrap(), "pv.panel.register({});");
+        assert!(dir.join("assets/a.json").is_file());
+        // current 指针指向新版本
+        assert_eq!(root.current_version("demo-hello").as_deref(), Some("1.0.0"));
+        // 条目符合契约 B 字段;permissions 快照来自 zip 内 manifest
+        let entry = &outcome.entry;
+        assert_eq!(entry["version"], "1.0.0");
+        assert_eq!(entry["channel"], "release");
+        assert_eq!(entry["enabled"], true, "首次安装默认启用");
+        assert_eq!(entry["sha256"], sha);
+        assert_eq!(entry["error"], Value::Null);
+        assert_eq!(
+            entry["permissions"],
+            json!(["net:example.com", "window:float"])
+        );
+        assert!(entry.get("installedAt").is_some_and(|v| v.is_string()));
+    }
+
+    #[test]
+    fn install_success_nested_layout_flattens_top_dir() {
+        let root = temp_root("install-nested");
+        let zip_bytes = make_zip(
+            &[
+                ("demo-hello/manifest.json", GOOD_MANIFEST.as_bytes()),
+                ("demo-hello/main.js", b"//demo"),
+            ],
+            &[],
+        );
+        let sha = sha_of(&zip_bytes);
+        install_from_bytes(
+            &root, &zip_bytes, &sha, "beta", "demo-hello", "1.0.0", "0.1.9-alpha.2", None,
+        )
+        .unwrap_or_else(|e| panic!("单顶层目录包应安装成功:{e:?}"));
+        let dir = root.store_dir("demo-hello").join("1.0.0");
+        assert_eq!(std::fs::read_to_string(dir.join("main.js")).unwrap(), "//demo");
+        assert!(!dir.join("demo-hello").exists(), "顶层目录前缀应被剥掉");
+    }
+
+    #[test]
+    fn install_rejects_sha_mismatch_before_writing() {
+        let root = temp_root("install-sha");
+        let zip_bytes = make_zip(&[("manifest.json", GOOD_MANIFEST.as_bytes())], &[]);
+        let wrong_sha = "0".repeat(64);
+        let err = install_from_bytes(
+            &root, &zip_bytes, &wrong_sha, "release", "demo-hello", "1.0.0", "0.1.9-alpha.2",
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::ShaMismatch(_)));
+        assert!(
+            !root.store_dir("demo-hello").exists(),
+            "sha 不符不应产生任何落盘"
+        );
+    }
+
+    #[test]
+    fn install_rejects_id_version_mismatch() {
+        let root = temp_root("install-mismatch");
+        let zip_bytes = make_zip(&[("manifest.json", GOOD_MANIFEST.as_bytes())], &[]);
+        let sha = sha_of(&zip_bytes);
+        // id 不一致
+        let err = install_from_bytes(
+            &root, &zip_bytes, &sha, "release", "other-id", "1.0.0", "0.1.9-alpha.2", None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::Other(ref m) if m.contains("不一致")));
+        // version 不一致
+        let err = install_from_bytes(
+            &root, &zip_bytes, &sha, "release", "demo-hello", "2.0.0", "0.1.9-alpha.2", None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::Other(ref m) if m.contains("不一致")));
+        assert!(!root.store_dir("demo-hello").exists(), "校验不符不应落盘");
+    }
+
+    #[test]
+    fn install_rejects_low_app_version() {
+        let root = temp_root("install-gate");
+        let zip_bytes = make_zip(
+            &[("manifest.json", MANIFEST_MIN_020.as_bytes())],
+            &[],
+        );
+        let sha = sha_of(&zip_bytes);
+        // 当前应用 0.1.9-alpha.2 < minAppVersion 0.2.0 → 拒绝(token-monitor 的预期行为)
+        let err = install_from_bytes(
+            &root, &zip_bytes, &sha, "release", "token-monitor", "1.0.0", "0.1.9-alpha.2", None,
+        )
+        .unwrap_err();
+        let InstallError::Other(msg) = err else {
+            panic!("应为 Other 错误");
+        };
+        assert!(msg.contains("应用版本过低"), "应报版本门错误:{msg}");
+        assert!(!root.store_dir("token-monitor").exists());
+        // 放宽应用版本后同一包可安装
+        install_from_bytes(
+            &root, &zip_bytes, &sha, "release", "token-monitor", "1.0.0", "0.2.0", None,
+        )
+        .unwrap_or_else(|e| panic!("满足 minAppVersion 时应成功:{e:?}"));
+    }
+
+    #[test]
+    fn update_switches_pointer_and_keeps_rollback_then_prunes() {
+        let root = temp_root("install-update");
+        let mk = |version: &str| {
+            let manifest = format!(
+                r#"{{ "id": "demo-hello", "name": "演示插件", "version": "{version}", "minAppVersion": "0.1.0", "type": "standard", "ui": "none", "permissions": [] }}"#
+            );
+            let name = format!("demo-hello/main.js");
+            make_zip(&[("demo-hello/manifest.json", manifest.as_bytes()), (name.as_str(), b"//v")], &[])
+        };
+
+        let v1 = mk("1.0.0");
+        install_from_bytes(
+            &root, &v1, &sha_of(&v1), "release", "demo-hello", "1.0.0", "0.1.9-alpha.2", None,
+        )
+        .unwrap();
+        // 更新到 2.0.0:current 切换,1.0.0 保留为回滚点
+        let v2 = mk("2.0.0");
+        let outcome = install_from_bytes(
+            &root, &v2, &sha_of(&v2), "release", "demo-hello", "2.0.0", "0.1.9-alpha.2", Some(false),
+        )
+        .unwrap();
+        assert_eq!(outcome.old_version.as_deref(), Some("1.0.0"));
+        assert_eq!(root.current_version("demo-hello").as_deref(), Some("2.0.0"));
+        assert!(root.store_dir("demo-hello").join("1.0.0").is_dir(), "回滚点保留");
+        assert_eq!(outcome.entry["enabled"], false, "更新保留既有 enabled 状态");
+        // 再次更新到 3.0.0:更旧的 1.0.0 被清理,保留 2.0.0 与 3.0.0
+        let v3 = mk("3.0.0");
+        install_from_bytes(
+            &root, &v3, &sha_of(&v3), "release", "demo-hello", "3.0.0", "0.1.9-alpha.2", Some(false),
+        )
+        .unwrap();
+        assert!(root.store_dir("demo-hello").join("2.0.0").is_dir());
+        assert!(!root.store_dir("demo-hello").join("1.0.0").exists(), "更旧版本应被清理");
+        // current 指针文件不是目录,不应被误删
+        assert_eq!(root.current_version("demo-hello").as_deref(), Some("3.0.0"));
+    }
+
+    /* ---- 卸载与状态迁移 ---- */
+
+    #[test]
+    fn uninstall_removes_dirs_and_state_entry_idempotent() {
+        let root = temp_root("uninstall");
+        let zip_bytes = make_zip(
+            &[("manifest.json", GOOD_MANIFEST.as_bytes()), ("main.js", b"//x")],
+            &[],
+        );
+        install_from_bytes(
+            &root, &zip_bytes, &sha_of(&zip_bytes), "release", "demo-hello", "1.0.0",
+            "0.1.9-alpha.2", None,
+        )
+        .unwrap();
+        // 模拟 KV 数据
+        let kv_path = root.data_dir("demo-hello").join("kv.json");
+        kv_write(&kv_path, "pos", json!({"x": 1})).unwrap();
+        assert!(root.store_dir("demo-hello").is_dir());
+        assert!(root.data_dir("demo-hello").is_dir());
+
+        let mut state = json!({
+            "version": 1,
+            "installed": {
+                "demo-hello": { "version": "1.0.0" },
+                "other": { "version": "0.9.0" }
+            }
+        });
+        assert!(remove_installed_entry(&mut state, "demo-hello"));
+        assert!(state["installed"].get("other").is_some(), "其他条目不受影响");
+
+        uninstall_artifacts(&root, "demo-hello");
+        assert!(!root.store_dir("demo-hello").exists());
+        assert!(!root.data_dir("demo-hello").exists());
+        // 幂等:重复清理与重复移除均安全
+        uninstall_artifacts(&root, "demo-hello");
+        assert!(!remove_installed_entry(&mut state, "demo-hello"));
+    }
+
+    #[test]
+    fn set_installed_entry_requires_object_shapes() {
+        let mut state = json!({ "version": 1, "installed": {} });
+        let entry = json!({ "version": "1.0.0", "channel": "release" });
+        assert!(set_installed_entry(&mut state, "demo-hello", entry));
+        assert_eq!(state["installed"]["demo-hello"]["version"], "1.0.0");
+        // installed 缺失/非对象时拒绝写入(命令层会先报错)
+        let mut bad = json!({ "version": 1 });
+        assert!(!set_installed_entry(&mut bad, "demo-hello", json!({})));
+        let mut arr = json!([]);
+        assert!(!set_installed_entry(&mut arr, "demo-hello", json!({})));
+    }
+
+    /* ---- 沙箱 KV ---- */
+
+    #[test]
+    fn kv_roundtrip_and_overwrite() {
+        let dir = std::env::temp_dir().join(format!("pv-kv-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("kv.json");
+        assert_eq!(kv_read(&path, "pos").unwrap(), None, "未写入时读取为空");
+        kv_write(&path, "pos", json!({"x": 10, "y": 20})).unwrap();
+        assert_eq!(kv_read(&path, "pos").unwrap(), Some(json!({"x": 10, "y": 20})));
+        kv_write(&path, "pos", json!({"x": 30, "y": 40})).unwrap();
+        kv_write(&path, "theme", json!("dark")).unwrap();
+        assert_eq!(kv_read(&path, "pos").unwrap(), Some(json!({"x": 30, "y": 40})));
+        assert_eq!(kv_read(&path, "theme").unwrap(), Some(json!("dark")));
+        assert_eq!(kv_read(&path, "missing").unwrap(), None);
+    }
+
+    #[test]
+    fn kv_rejects_bad_key_and_oversized_value() {
+        let dir = std::env::temp_dir().join(format!("pv-kv-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("kv.json");
+        assert!(kv_write(&path, "", json!("v")).is_err());
+        assert!(kv_write(&path, &"k".repeat(129), json!("v")).is_err());
+        assert!(kv_read(&path, "").is_err());
+        let big = "x".repeat(64 * 1024 + 1);
+        assert!(kv_write(&path, "big", json!(big)).is_err(), "超限值应被拒绝");
+        assert!(!path.exists(), "被拒绝的写入不应产生文件");
+    }
+
+    #[test]
+    fn plugin_id_validation_guards_path_traversal() {
+        for bad in [
+            "",
+            "../etc",
+            "a/b",
+            "..",
+            "A",
+            "a_b",
+            "a b",
+            "-lead",
+            "trail-",
+            "中",
+            &"a".repeat(65),
+        ] {
+            assert!(ensure_plugin_id(bad).is_err(), "「{bad}」应被拒绝");
+        }
+        for ok in ["a", "demo-hello", "token-monitor", "a1-b2-c3"] {
+            assert!(ensure_plugin_id(ok).is_ok(), "「{ok}」应放行");
+        }
+    }
+
+    /* ---- 契约样例(三方共用,写端断言) ---- */
+
+    #[test]
+    fn contract_sample_matches_write_side_schema() {
+        // 写端 serde 校验通过(字段齐全、类型正确)
+        validate_plugins_state(contract_sample::PLUGINS_JSON)
+            .unwrap_or_else(|e| panic!("契约样例应通过写端校验:{e}"));
+        // 结构断言:与契约 B 逐字段对照
+        let v: Value = serde_json::from_str(contract_sample::PLUGINS_JSON).unwrap();
+        assert_eq!(v["version"], 1);
+        assert_eq!(v["activeSourceId"], "official");
+        let source = &v["sources"][0];
+        assert_eq!(source["id"], "official");
+        assert_eq!(source["provider"], "github");
+        assert_eq!(source["url"], "https://github.com/prompt-vault/plugins");
+        assert_eq!(source["branch"], Value::Null);
+        let entry = &v["installed"]["token-monitor"];
+        assert_eq!(entry["version"], "1.0.0");
+        assert_eq!(entry["channel"], "release");
+        assert_eq!(entry["enabled"], true);
+        assert_eq!(entry["error"], Value::Null);
+        assert_eq!(entry["permissions"].as_array().unwrap().len(), 5);
+        assert_eq!(v["mcp"]["enabled"], false);
+        // 缺 error 字段(契约必填)应被写端校验拒绝
+        let missing_error = r#"{"version":1,"sources":[],"activeSourceId":null,"installed":{"x":{"version":"1","channel":"release","enabled":true,"sha256":"s","installedAt":"t"}},"mcp":{"enabled":false}}"#;
+        assert!(validate_plugins_state(missing_error).is_err());
+    }
+}
