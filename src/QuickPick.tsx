@@ -6,6 +6,7 @@ import {
   getDataPath,
   hideQuickpick,
   openEditor,
+  openNew,
   readDataFile,
 } from "./api";
 import {
@@ -274,6 +275,16 @@ export default function QuickPick() {
         void openEditor(selected.item.id);
         finish();
       }
+    } else if (
+      (e.ctrlKey || e.metaKey) &&
+      !e.shiftKey &&
+      !e.altKey &&
+      (e.key === "n" || e.key === "N")
+    ) {
+      // Ctrl+N:唤起主窗口进入空白新建(组字守卫在函数入口;确认态/变量弹窗期间走不到这里)
+      e.preventDefault();
+      void openNew();
+      finish();
     } else if (e.key === "Escape") {
       e.preventDefault();
       void hideQuickpick();
@@ -405,6 +416,7 @@ export default function QuickPick() {
         <div className="qp-footer">
           <span>↩ 复制</span>
           <span>Tab 编辑</span>
+          <span>Ctrl+N 新建</span>
           <span>Esc 关闭</span>
         </div>
         {copied && (

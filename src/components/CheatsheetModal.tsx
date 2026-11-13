@@ -60,6 +60,7 @@ export default function CheatsheetModal({ hotkeys, onClose }: Props) {
         { keys: ["Enter"], desc: "标签输入框:确认并添加标签" },
         { keys: ["Enter"], desc: "变量弹窗:在最后一个输入框直接复制" },
         { keys: ["↑ ↓", "Enter", "Esc"], desc: "快速拾取:选择 / 复制 / 关闭" },
+        { keys: ["Ctrl+N"], desc: "快速拾取:唤出主窗口新建" },
         { keys: ["Ctrl+A"], desc: "全选当前列表(多选)" },
         { keys: ["Esc"], desc: "清除多选 / 关闭弹窗" },
       ],

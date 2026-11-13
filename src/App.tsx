@@ -423,6 +423,33 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      try {
+        // 快速拾取窗口按 Ctrl+N:主窗口进入空白新建(清弹层,避免被面板遮挡)
+        const u5 = await listen("open-new", () => {
+          setPrefill(null);
+          setPrefillSeq((s) => s + 1);
+          setTrashOpen(false);
+          setSearch("");
+          setActiveTag(null);
+          setCopyTarget(null);
+          setPurgeTarget(null);
+          setImportCandidate(null);
+          setBatchPurgeOpen(false);
+          setSettingsOpen(false);
+          setPaletteOpen(false);
+          setCheatsheetOpen(false);
+          setSelectedIds(new Set());
+          shiftAnchor.current = null;
+          setMode({ kind: "new" });
+        });
+        if (disposed) {
+          u5();
+          return;
+        }
+        unlistens.push(u5);
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       disposed = true;

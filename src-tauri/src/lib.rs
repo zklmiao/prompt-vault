@@ -481,6 +481,13 @@ fn open_editor(app: AppHandle, id: String) {
     let _ = app.emit_to(MAIN_LABEL, "open-editor", id);
 }
 
+/// 从快速拾取窗口唤起主窗口并进入空白新建(Ctrl+N)
+#[tauri::command]
+fn open_new(app: AppHandle) {
+    show_main_window(&app);
+    let _ = app.emit_to(MAIN_LABEL, "open-new", ());
+}
+
 /// 自绘标题栏:最小化主窗口
 #[tauri::command]
 fn win_minimize(app: AppHandle) {
@@ -565,6 +572,7 @@ pub fn run() {
             first_run_default,
             hide_quickpick,
             open_editor,
+            open_new,
             win_minimize,
             win_is_maximized,
             win_toggle_maximize,

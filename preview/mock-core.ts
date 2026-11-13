@@ -153,6 +153,9 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     case "open_editor":
       console.log("[mock] open_editor", args?.id);
       return null;
+    case "open_new":
+      console.log("[mock] open_new");
+      return null;
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
   }

@@ -58,6 +58,9 @@ export const hideQuickpick = (): Promise<void> =>
 export const openEditor = (id: string): Promise<void> =>
   invoke("open_editor", { id });
 
+/** 从快速拾取窗口唤起主窗口并进入空白新建(Ctrl+N) */
+export const openNew = (): Promise<void> => invoke("open_new");
+
 // ---- 自绘标题栏的窗口控制 ----
 export const winMinimize = (): Promise<void> => invoke("win_minimize");
 export const winToggleMaximize = (): Promise<void> =>
