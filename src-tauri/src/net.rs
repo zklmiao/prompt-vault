@@ -454,6 +454,24 @@ pub(crate) fn credential_env_configured_with(
     not_empty(&getenv(&single_key_env_name(scope)))
 }
 
+// ---------- 共享 Agent(连接复用) ----------
+
+/// 进程级共享 ureq Agent:配置与原先逐请求构建逐字一致(整体超时 15s + 不跟随
+/// 重定向),协议行为零变化,仅获得 keep-alive 连接复用 —— 同 host 的后续请求
+/// 免重复 TCP/TLS 握手。ureq 2.x Agent 内部为 Arc 状态(Send+Sync),官方推荐
+/// 全局共享;OnceLock 为 std 原生,零新依赖。plugins.rs 的 http_get_bytes
+/// (清单/插件包下载)共用此实例。
+pub(crate) fn shared_agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            // 不跟随重定向:防止白名单内域名经 3xx 跳转到内网地址绕过校验
+            .redirects(0)
+            .build()
+    })
+}
+
 // ---------- 命令 ----------
 
 /// 插件网络代理命令。返回 HTTP status 与响应体(任何状态码都算成功返回);
@@ -519,11 +537,7 @@ fn plugin_net_fetch_with(
         .iter()
         .any(|(name, _)| name.eq_ignore_ascii_case("content-type"));
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        // 不跟随重定向:防止白名单内域名经 3xx 跳转到内网地址绕过校验
-        .redirects(0)
-        .build();
+    let agent = shared_agent();
     let mut req = agent.request(method, parsed.as_str());
 
     if let Some(mode_name) = mode {

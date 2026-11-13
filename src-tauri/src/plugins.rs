@@ -36,8 +36,6 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tauri::{Emitter, Manager};
 
-/// HTTP 整体超时(与 net.rs 保持一致)
-const HTTP_TIMEOUT_SECS: u64 = 15;
 /// 仓库清单响应体上限 2MB
 const MAX_MANIFEST_BYTES: usize = 2 * 1024 * 1024;
 /// 插件包下载上限 2MB(v1 插件 = JS + 数据文件,与清单同限)
@@ -385,12 +383,10 @@ enum FetchFail {
     Other(String),
 }
 
-/// GET 指定 URL:15s 超时、不跟随重定向、响应体限长(404 单独区分供 ref 回退)
+/// GET 指定 URL:15s 超时、不跟随重定向、响应体限长(404 单独区分供 ref 回退);
+/// Agent 取 net.rs 的进程级共享实例(配置逐字一致),获得 keep-alive 连接复用
 fn http_get_bytes(url: &url::Url, cap: usize) -> Result<Vec<u8>, FetchFail> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .redirects(0)
-        .build();
+    let agent = crate::net::shared_agent();
     let response = match agent.get(url.as_str()).call() {
         Ok(resp) => resp,
         Err(ureq::Error::Status(404, _)) => return Err(FetchFail::NotFound),
