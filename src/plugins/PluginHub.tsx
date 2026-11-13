@@ -77,12 +77,15 @@ interface Props {
   /** 权限确认/卸载确认弹层开关,供 App 的弹层守卫 */
   onModalOpenChange(open: boolean): void;
   onCommandsChanged(): void;
+  /** 球窗「打开详情面板」跨窗口激活信号(seq 变化即切到对应面板页签) */
+  activePanelFocus?: { id: string; seq: number } | null;
 }
 
 export default function PluginHub({
   showToast,
   onModalOpenChange,
   onCommandsChanged,
+  activePanelFocus,
 }: Props) {
   const { t } = useI18n();
   const [state, setState] = useState<PluginsState | null>(null);
@@ -154,6 +157,12 @@ export default function PluginHub({
   useEffect(() => {
     onModalOpenChange(!!(installCandidate || uninstallTarget));
   }, [installCandidate, uninstallTarget, onModalOpenChange]);
+
+  // 跨窗口面板激活:球窗 pv.window.openPanel → pv-open-plugin-panel → 此处切页签
+  useEffect(() => {
+    if (!activePanelFocus) return;
+    setSection(`panel:${activePanelFocus.id}`);
+  }, [activePanelFocus]);
 
   const activeSource = useMemo(
     () => state?.sources.find((s) => s.id === state.activeSourceId) ?? null,

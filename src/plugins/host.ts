@@ -4,10 +4,11 @@
 // (window.__pvSlot) 内联注入(同步执行);单插件注入后 3s 内未注册即标记
 // error 并 toast,失败隔离,不影响其他插件与主窗口。
 
-import { pluginInstalledManifest, pluginReadEntry, readPluginsState, writePluginsState } from "./api";
+import { pluginInstalledManifest, pluginReadEntry, kvGet, pluginOpenWindow, readPluginsState, writePluginsState } from "./api";
 import { createBridge } from "./bridge";
 import {
   getI18nDict,
+  getWindowSetup,
   hasRegistered,
   pluginCommands,
   resetRegistry,
@@ -280,6 +281,8 @@ export async function bootstrapPlugins(hooks: HostHooks): Promise<void> {
       await injectIsolated(id, hooks);
     }
   }
+  // 注入轮完成后:ui:"window" 插件按 window:visible 自动显示(§D1;隐藏过的重启不弹)
+  await autoShowWindowPlugins();
   hooks.onCommandsChanged();
 }
 
@@ -287,6 +290,57 @@ export async function bootstrapPlugins(hooks: HostHooks): Promise<void> {
 export async function injectAfterEnable(id: string, hooks: HostHooks): Promise<void> {
   await injectIsolated(id, hooks);
   hooks.onCommandsChanged();
+  // 即插即用:window 型插件注入成功后总是自动打开(无视 window:visible;§D1;
+  // 注入失败时 registry 无 windowSetup,经 getWindowSetup 判定自然跳过)
+  const manifest = await pluginInstalledManifest(id).catch(() => null);
+  if (manifest?.ui === "window" && getWindowSetup(id)) {
+    await openWindowPlugin(id, true);
+  }
+}
+
+/* ---------- 窗口自动显示(§D1) ---------- */
+
+/**
+ * 启动自动显示:对 enabled 且 manifest.ui==="window" 的插件逐个开窗。
+ * 单个失败不阻断其余插件(失败已在 markPluginError/控制台可见)。
+ */
+async function autoShowWindowPlugins(): Promise<void> {
+  let state: PluginsState;
+  try {
+    state = await loadPluginsState();
+  } catch {
+    return;
+  }
+  for (const id of Object.keys(state.installed)) {
+    if (!state.installed[id].enabled) continue;
+    const manifest = await pluginInstalledManifest(id).catch(() => null);
+    if (manifest?.ui !== "window") continue;
+    await openWindowPlugin(id, false);
+  }
+}
+
+/**
+ * 开窗:尺寸取 registry 的 windowSetup.size(缺省由 Rust 侧 320×240 兜底),
+ * 位置取 kv 的 window:x/y(Rust 拖动防抖写入,有则传给 Rust 先定位后显示)。
+ * always=false(启动):window:visible 缺省视为 true,false 则不弹;
+ * always=true(安装/启用即插即用):无视 window:visible 总是弹。
+ */
+async function openWindowPlugin(id: string, always: boolean): Promise<void> {
+  if (!always) {
+    const visible = await kvGet(id, "window:visible").catch(() => null);
+    if (visible === false) return;
+  }
+  const size = getWindowSetup(id)?.size;
+  const [x, y] = await Promise.all([
+    kvGet(id, "window:x").catch(() => null),
+    kvGet(id, "window:y").catch(() => null),
+  ]);
+  const pos: { x?: number; y?: number } = {};
+  if (typeof x === "number") pos.x = x;
+  if (typeof y === "number") pos.y = y;
+  await pluginOpenWindow(id, size, pos).catch((e) => {
+    console.warn(`[pv] 打开插件窗口失败(${id}):`, e);
+  });
 }
 
 /* ---------- 命令面板桥接 ---------- */

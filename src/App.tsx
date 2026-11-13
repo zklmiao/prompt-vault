@@ -1188,6 +1188,31 @@ export default function App() {
     setActiveTag(null);
   }, []);
 
+  /** 球窗「打开详情面板」的跨窗口激活信号(seq 保证同插件重复事件也重触发) */
+  const [panelFocus, setPanelFocus] = useState<{ id: string; seq: number } | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        const stop = await listen<string>("pv-open-plugin-panel", (e) => {
+          const id = e.payload;
+          if (typeof id !== "string" || id === "") return;
+          setPanelFocus((prev) => ({ id, seq: (prev?.seq ?? 0) + 1 }));
+          switchPane("plugins");
+        });
+        if (disposed) stop();
+        else unlisten = stop;
+      } catch {
+        /* 浏览器预览无事件系统 */
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [switchPane]);
+
   /** 原生拖放:第一个路径决定走导入(.json)还是新建文本 */
   const handleDroppedPaths = useCallback(
     async (paths: string[]) => {
@@ -1597,6 +1622,7 @@ export default function App() {
             showToast={showToast}
             onModalOpenChange={setPluginModalOpen}
             onCommandsChanged={refreshPluginCommands}
+            activePanelFocus={panelFocus}
           />
         ) : (
           <>
