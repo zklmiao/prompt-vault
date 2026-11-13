@@ -12,10 +12,12 @@ use tauri::{
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+mod credentials;
 mod data_lock;
 mod data_watch;
 mod fuzzy;
 mod mcp;
+mod net;
 
 /// `--mcp` headless 入口:stdio JSON-RPC MCP Server。
 /// 不走 tauri Builder,不建窗口/托盘/单实例,由 CLI 客户端按需拉起。
@@ -589,7 +591,10 @@ pub fn run() {
             win_minimize,
             win_is_maximized,
             win_toggle_maximize,
-            win_close
+            win_close,
+            credentials::plugin_credential_set,
+            credentials::plugin_credential_delete,
+            net::plugin_net_fetch
         ])
         .setup(move |app| {
             // 恢复上次记住的主窗口位置与大小

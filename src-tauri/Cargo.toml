@@ -29,6 +29,13 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 notify = "8"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+# Windows 凭据管理器封装(插件系统凭据服务,keyring 3 无默认 feature,按平台显式开启)
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+# 插件网络代理:轻量 HTTP 栈(rustls + 系统根证书,关闭 cookies/gzip 等非必需 feature)
+ureq = { version = "2", default-features = false, features = ["tls", "native-certs"] }
+# 火山方舟 V4 请求签名
+hmac = "0.12"
+url = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
