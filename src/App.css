@@ -1793,6 +1793,15 @@ mark.hl {
   padding: 12px 16px;
 }
 
+/* 插件面板页签条:插件功能入口与系统功能区(Installed/Sources/Market)分行 */
+.ph-panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
 .ph-list {
   display: flex;
   flex-direction: column;

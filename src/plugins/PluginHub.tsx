@@ -566,6 +566,10 @@ export default function PluginHub({
           >
             <IconMarket size={14} /> {t("ph.tabMarket")}
           </button>
+        </div>
+      </div>
+      {panels.length > 0 ? (
+        <div className="ph-panel-tabs">
           {panels.map(({ pluginId, def }) => (
             <button
               key={pluginId}
@@ -576,7 +580,7 @@ export default function PluginHub({
             </button>
           ))}
         </div>
-      </div>
+      ) : null}
       <div className="ph-body">
         {section === "installed" ? renderInstalled() : null}
         {section === "sources" ? renderSources() : null}
