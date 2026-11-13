@@ -73,23 +73,41 @@ fn validate_scope(scope: &str) -> Result<(), String> {
     }
 }
 
-/// 凭据写入(设置面板录入各家 Key 时直调)
+/// 凭据写入(设置面板录入各家 Key 时直调;main-only:插件窗口整体挡在门外)
 #[tauri::command]
-pub fn plugin_credential_set(scope: String, secret: String) -> Result<(), String> {
+pub fn plugin_credential_set(
+    window: tauri::WebviewWindow,
+    scope: String,
+    secret: String,
+) -> Result<(), String> {
+    crate::plugins::ensure_caller_main(window.label())?;
     credential_set_with(&SystemKeyring, &scope, &secret)
 }
 
-/// 凭据删除
+/// 凭据删除(main-only)
 #[tauri::command]
-pub fn plugin_credential_delete(scope: String) -> Result<(), String> {
+pub fn plugin_credential_delete(
+    window: tauri::WebviewWindow,
+    scope: String,
+) -> Result<(), String> {
+    crate::plugins::ensure_caller_main(window.label())?;
     credential_delete_with(&SystemKeyring, &scope)
 }
 
 /// scope 凭据是否已配置(设置面板/插件面板展示「已配置」用):
 /// 环境变量优先(命名与空串语义复用 net.rs 的 credential_env_configured),
 /// env 未配置再查 keyring 条目 —— get 后只判存在与非空,**秘密值绝不返回**。
+/// self-or-main 的退化形:参数是 scope 而无 plugin_id,逐字比对以调用者
+/// 自身 label 剥前缀的 id 进行 —— 任意插件窗口可查存在性布尔(前端桥已
+/// fail-closed 限定自身 manifest 的 scope),非 main/插件窗口一律拒绝。
 #[tauri::command]
-pub fn plugin_credential_configured(scope: String) -> Result<bool, String> {
+pub fn plugin_credential_configured(
+    window: tauri::WebviewWindow,
+    scope: String,
+) -> Result<bool, String> {
+    let label = window.label();
+    let self_id = label.strip_prefix(crate::plugins::PLUGIN_WINDOW_PREFIX).unwrap_or("");
+    crate::plugins::ensure_caller_self_or_main(label, self_id)?;
     credential_configured_with(&SystemKeyring, &scope, &crate::net::real_env)
 }
 

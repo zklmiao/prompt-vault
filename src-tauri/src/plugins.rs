@@ -958,11 +958,56 @@ fn kv_write(path: &Path, key: &str, value: Value) -> Result<(), String> {
     crate::write_atomic(path, &json)
 }
 
+/* ---------- 调用者校验(P0 跨窗口加固) ---------- */
+
+/// 仅主窗口放行:插件窗口冒充宿主调用 main-only 命令(改状态/装卸插件/写凭据)
+/// 一律拒绝。主窗 webview 内的插件绕过桥直调 invoke 时 label 恒为 "main",
+/// 命令层无法区分宿主与插件 —— 这是 D1 可信插件模型的已接受结构性边界,
+/// 跨窗口维度之外的防护不在此实现(docs §8 两维威胁模型)。
+pub(crate) fn ensure_caller_main(caller_label: &str) -> Result<(), String> {
+    if caller_label == crate::MAIN_LABEL {
+        Ok(())
+    } else {
+        Err("该命令仅限主窗口调用".to_string())
+    }
+}
+
+/// 主窗口或「本插件自己的窗口」放行:self = 调用者窗口 label 与参数 plugin_id
+/// 逐字匹配(pv-plugin-<plugin_id>),防 A 插件窗口冒充 B 插件读包文件、
+/// 以 B 身份取数、操作 B 的窗口。逐字比较(区分大小写、非前缀匹配);
+/// 无 plugin_id 参数的命令(plugin_credential_configured)以调用者自身
+/// label 剥前缀得到的 id 传入,语义退化为「任意插件窗口可查」。
+pub(crate) fn ensure_caller_self_or_main(
+    caller_label: &str,
+    plugin_id: &str,
+) -> Result<(), String> {
+    if caller_label == crate::MAIN_LABEL
+        || caller_label == format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}")
+    {
+        Ok(())
+    } else {
+        Err("插件窗口只能操作自身".to_string())
+    }
+}
+
 /* ---------- 命令 ---------- */
 
 /// 拉取激活源的插件清单(host 仅 gitea 平台使用;四平台 ref 回退见 refs_to_try)
 #[tauri::command]
 pub fn plugin_fetch_source(
+    window: tauri::WebviewWindow,
+    provider: String,
+    owner: String,
+    repo: String,
+    branch: Option<String>,
+    host: Option<String>,
+) -> Result<SourceManifest, String> {
+    ensure_caller_main(window.label())?;
+    plugin_fetch_source_with(provider, owner, repo, branch, host)
+}
+
+/// 命令体(调用者校验后执行;与签名解耦便于单测)
+fn plugin_fetch_source_with(
     provider: String,
     owner: String,
     repo: String,
@@ -996,6 +1041,19 @@ pub fn plugin_fetch_source(
 /// expect_* 四参数来自市场清单条目,zip 内 manifest 必须与之逐字一致。
 #[tauri::command]
 pub fn plugin_install(
+    window: tauri::WebviewWindow,
+    url: String,
+    sha256: String,
+    channel: String,
+    expect_id: String,
+    expect_version: String,
+) -> Result<Value, String> {
+    ensure_caller_main(window.label())?;
+    plugin_install_with(url, sha256, channel, expect_id, expect_version)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_install_with(
     url: String,
     sha256: String,
     channel: String,
@@ -1062,7 +1120,13 @@ pub fn plugin_install(
 
 /// 卸载插件:删 store/<id>/ 与 data/<id>/,更新 plugins.json;重复调用幂等
 #[tauri::command]
-pub fn plugin_uninstall(id: String) -> Result<(), String> {
+pub fn plugin_uninstall(window: tauri::WebviewWindow, id: String) -> Result<(), String> {
+    ensure_caller_main(window.label())?;
+    plugin_uninstall_with(id)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_uninstall_with(id: String) -> Result<(), String> {
     ensure_plugin_id(&id)?;
     let root = PluginRoot::discover();
     uninstall_artifacts(&root, &id);
@@ -1075,7 +1139,13 @@ pub fn plugin_uninstall(id: String) -> Result<(), String> {
 
 /// 宿主读取 plugins.json;文件缺失返回默认骨架(不落盘),损坏返回可读错误
 #[tauri::command]
-pub fn plugin_read_state() -> Result<String, String> {
+pub fn plugin_read_state(window: tauri::WebviewWindow) -> Result<String, String> {
+    ensure_caller_main(window.label())?;
+    plugin_read_state_with()
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_read_state_with() -> Result<String, String> {
     match std::fs::read_to_string(plugins_file_path()) {
         Ok(raw) => {
             validate_plugins_state(&raw)?;
@@ -1088,14 +1158,33 @@ pub fn plugin_read_state() -> Result<String, String> {
 
 /// 宿主写入 plugins.json:字符串透传 + serde 校验,写盘复用 write_atomic
 #[tauri::command]
-pub fn plugin_write_state(json: String) -> Result<(), String> {
+pub fn plugin_write_state(
+    window: tauri::WebviewWindow,
+    json: String,
+) -> Result<(), String> {
+    ensure_caller_main(window.label())?;
+    plugin_write_state_with(json)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_write_state_with(json: String) -> Result<(), String> {
     validate_plugins_state(&json)?;
     crate::write_atomic(&plugins_file_path(), &json)
 }
 
 /// 插件沙箱 KV 读取(键不存在返回 null)
 #[tauri::command]
-pub fn plugin_kv_get(plugin_id: String, key: String) -> Result<Option<Value>, String> {
+pub fn plugin_kv_get(
+    window: tauri::WebviewWindow,
+    plugin_id: String,
+    key: String,
+) -> Result<Option<Value>, String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_kv_get_with(plugin_id, key)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_kv_get_with(plugin_id: String, key: String) -> Result<Option<Value>, String> {
     ensure_plugin_id(&plugin_id)?;
     let root = PluginRoot::discover();
     kv_read(&root.data_dir(&plugin_id).join("kv.json"), &key)
@@ -1103,7 +1192,18 @@ pub fn plugin_kv_get(plugin_id: String, key: String) -> Result<Option<Value>, St
 
 /// 插件沙箱 KV 写入
 #[tauri::command]
-pub fn plugin_kv_set(plugin_id: String, key: String, value: Value) -> Result<(), String> {
+pub fn plugin_kv_set(
+    window: tauri::WebviewWindow,
+    plugin_id: String,
+    key: String,
+    value: Value,
+) -> Result<(), String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_kv_set_with(plugin_id, key, value)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_kv_set_with(plugin_id: String, key: String, value: Value) -> Result<(), String> {
     ensure_plugin_id(&plugin_id)?;
     let root = PluginRoot::discover();
     kv_write(
@@ -1152,15 +1252,26 @@ fn read_entry(
 
 #[tauri::command]
 pub fn plugin_read_entry(
+    window: tauri::WebviewWindow,
     plugin_id: String,
     rel_path: String,
 ) -> Result<Option<String>, String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
     read_entry(&PluginRoot::discover(), &plugin_id, &rel_path)
 }
 
 /// 已安装插件包内 manifest.json 内容(宿主展示名称/ui 形态/错误恢复用)
 #[tauri::command]
-pub fn plugin_installed_manifest(plugin_id: String) -> Result<Option<Value>, String> {
+pub fn plugin_installed_manifest(
+    window: tauri::WebviewWindow,
+    plugin_id: String,
+) -> Result<Option<Value>, String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_installed_manifest_with(plugin_id)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_installed_manifest_with(plugin_id: String) -> Result<Option<Value>, String> {
     ensure_plugin_id(&plugin_id)?;
     let root = PluginRoot::discover();
     let Some(dir) = root.resolve_version_dir(&plugin_id) else {
@@ -1184,6 +1295,20 @@ pub fn plugin_installed_manifest(plugin_id: String) -> Result<Option<Value>, Str
 /// async 命令在运行时线程执行,事件循环保持空闲可完成 webview 初始化。
 #[tauri::command]
 pub async fn plugin_open_window(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    plugin_id: String,
+    width: Option<f64>,
+    height: Option<f64>,
+    x: Option<i32>,
+    y: Option<i32>,
+) -> Result<(), String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_open_window_with(app, plugin_id, width, height, x, y)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_open_window_with(
     app: tauri::AppHandle,
     plugin_id: String,
     width: Option<f64>,
@@ -1198,7 +1323,7 @@ pub async fn plugin_open_window(
         let _ = existing.set_focus();
         return Ok(());
     }
-    let title = plugin_installed_manifest(plugin_id.clone())
+    let title = plugin_installed_manifest_with(plugin_id.clone())
         .ok()
         .flatten()
         .and_then(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
@@ -1248,6 +1373,18 @@ pub async fn plugin_open_window(
 /// 调整插件窗口尺寸(逻辑像素;球窗右键菜单临时扩窗,收起后由插件恢复 84×84)
 #[tauri::command]
 pub fn plugin_resize_window(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    plugin_id: String,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_resize_window_with(app, plugin_id, width, height)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_resize_window_with(
     app: tauri::AppHandle,
     plugin_id: String,
     width: f64,
@@ -1271,7 +1408,17 @@ pub fn plugin_resize_window(
 /// 避免 core 权限面差异导致拖动静默失效(冒烟实测);拖动终点位置仍由
 /// Moved 防抖独占落盘,架构上位置写入权在 Rust 不变。
 #[tauri::command]
-pub fn plugin_start_drag(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
+pub fn plugin_start_drag(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    plugin_id: String,
+) -> Result<(), String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_start_drag_with(app, plugin_id)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_start_drag_with(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
     ensure_plugin_id(&plugin_id)?;
     let label = format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}");
     let Some(window) = app.get_webview_window(&label) else {
@@ -1285,7 +1432,17 @@ pub fn plugin_start_drag(app: tauri::AppHandle, plugin_id: String) -> Result<(),
 /// 球窗唤出主窗口并激活本插件详情面板:show main → emit pv-open-plugin-panel
 /// (payload = plugin_id,主窗口切插件分栏并打开对应页签)
 #[tauri::command]
-pub fn plugin_show_main_panel(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
+pub fn plugin_show_main_panel(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    plugin_id: String,
+) -> Result<(), String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_show_main_panel_with(app, plugin_id)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_show_main_panel_with(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
     ensure_plugin_id(&plugin_id)?;
     crate::show_main_window(&app);
     let _ = app.emit_to(crate::MAIN_LABEL, "pv-open-plugin-panel", plugin_id);
@@ -1294,12 +1451,23 @@ pub fn plugin_show_main_panel(app: tauri::AppHandle, plugin_id: String) -> Resul
 
 /// 关闭插件窗口(停用/卸载前由宿主调用;不存在则静默)
 #[tauri::command]
-pub fn plugin_close_window(app: tauri::AppHandle, plugin_id: String) {
+pub fn plugin_close_window(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    plugin_id: String,
+) -> Result<(), String> {
+    ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_close_window_with(app, plugin_id)
+}
+
+/// 命令体(调用者校验后执行)
+fn plugin_close_window_with(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
     if ensure_plugin_id(&plugin_id).is_ok() {
         if let Some(w) = app.get_webview_window(&format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}")) {
             let _ = w.close();
         }
     }
+    Ok(())
 }
 
 /* ---------- 球窗位置持久化(Rust 独占写,插件 JS 不感知) ---------- */
@@ -2124,6 +2292,55 @@ mod tests {
         std::fs::write(&path, [0xC0, 0xC1, 0xF5, 0xFF, 0xFE]).unwrap();
         let err = read_entry(&root, "demo-hello", "binary.js").unwrap_err();
         assert!(err.contains("UTF-8"), "非法 UTF-8 应报可读错误:{err}");
+    }
+
+    /* ---- 调用者校验 helper(P0 跨窗口加固) ---- */
+
+    #[test]
+    fn caller_main_allows_only_exact_main_label() {
+        assert!(ensure_caller_main("main").is_ok(), "主窗放行");
+        // 大小写与空白边界:逐字比较
+        for bad in ["Main", "MAIN", "main ", " main", "quickpick", "pv-plugin-demo-hello", ""] {
+            assert!(ensure_caller_main(bad).is_err(), "「{bad}」应被拒绝");
+        }
+        // 拒绝消息可读
+        let err = ensure_caller_main("pv-plugin-demo-hello").unwrap_err();
+        assert!(err.contains("仅限主窗口调用"), "拒绝消息应可读:{err}");
+    }
+
+    #[test]
+    fn caller_self_or_main_three_states() {
+        // ① main 放行
+        assert!(ensure_caller_self_or_main("main", "demo-hello").is_ok());
+        // ② 自身窗口放行(label 与 plugin_id 逐字拼合匹配)
+        assert!(ensure_caller_self_or_main("pv-plugin-demo-hello", "demo-hello").is_ok());
+        // ③ 他人插件窗口拒绝
+        assert!(ensure_caller_self_or_main("pv-plugin-other", "demo-hello").is_err());
+        assert!(ensure_caller_self_or_main("pv-plugin-demo-hello", "other").is_err());
+        assert!(ensure_caller_self_or_main("quickpick", "demo-hello").is_err());
+        assert!(ensure_caller_self_or_main("", "demo-hello").is_err());
+        // 拒绝消息可读
+        let err = ensure_caller_self_or_main("pv-plugin-other", "demo-hello").unwrap_err();
+        assert!(err.contains("只能操作自身"), "拒绝消息应可读:{err}");
+    }
+
+    #[test]
+    fn caller_self_prefix_and_case_boundaries() {
+        // 前缀形近但不等长:pv-plugin-demo 是「demo」窗口与「demo-hello」不匹配
+        assert!(ensure_caller_self_or_main("pv-plugin-demo", "demo-hello").is_err());
+        // 非前缀匹配:调用者 label 多一层后缀不等于目标 id
+        assert!(ensure_caller_self_or_main("pv-plugin-demo-hello-extra", "demo-hello").is_err());
+        // 大小写敏感:大写变体一律拒绝
+        assert!(ensure_caller_self_or_main("PV-PLUGIN-demo-hello", "demo-hello").is_err());
+        assert!(ensure_caller_self_or_main("pv-Plugin-demo-hello", "demo-hello").is_err());
+        // 无 plugin_id 参数命令的退化形:调用者 label 剥前缀得到自身 id 恒匹配
+        let label = "pv-plugin-token-monitor";
+        let self_id = label.strip_prefix(PLUGIN_WINDOW_PREFIX).unwrap_or("");
+        assert!(ensure_caller_self_or_main(label, self_id).is_ok(), "退化形:插件窗口查自身");
+        // 非 main 非插件窗口(quickpick)剥前缀失败 → 空 id → 拒绝
+        let qp = "quickpick";
+        let qp_id = qp.strip_prefix(PLUGIN_WINDOW_PREFIX).unwrap_or("");
+        assert!(ensure_caller_self_or_main(qp, qp_id).is_err(), "退化形:非插件窗口拒绝");
     }
 
     /* ---- 契约样例(三方共用,写端断言) ---- */

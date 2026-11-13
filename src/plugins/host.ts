@@ -23,6 +23,7 @@ import {
 } from "../i18n";
 import type { PluginPaletteCommand } from "./palette";
 import type { InstalledEntry, PluginsState, SourceConfig } from "./types";
+import { windowLabel } from "../window";
 
 /** 注册超时:注入后 3s 内未调用任何 pv.* 注册 → 标记 error */
 const REGISTER_TIMEOUT_MS = 3000;
@@ -195,8 +196,12 @@ function dictToEntries(dict: unknown, pluginId: string): Array<{ code: string; c
  */
 export async function injectOne(pluginId: string): Promise<void> {
   const manifest = await pluginInstalledManifest(pluginId).catch(() => null);
-  if (manifest && manifest.type === "i18n") {
-    // 语言包为纯数据:不注入脚本,消费后即可生效(启用时即插即用)
+  if (manifest && manifest.type === "i18n" && windowLabel() === "main") {
+    // 语言包为纯数据:不注入脚本,消费后即可生效(启用时即插即用)。
+    // main 守卫(P0 调用图一致性):rebuildLanguagePacks 链上的 plugin_read_state
+    // 为 main-only,而 injectOne 也在插件窗口跑(PluginWindow 注入路径)。
+    // 当前 i18n 型插件无窗口故此路径不可达,但门控与调用图必须由构造保证
+    // 一致,不靠巧合;非 main 窗口落到下方脚本注入路径(无 main.js 即报错)。
     await rebuildLanguagePacks();
     return;
   }

@@ -460,6 +460,17 @@ pub(crate) fn credential_env_configured_with(
 /// 仅安全校验失败或传输层错误时返回 Err。
 #[tauri::command]
 pub fn plugin_net_fetch(
+    window: tauri::WebviewWindow,
+    plugin_id: String,
+    url: String,
+    opts: Option<NetFetchOpts>,
+) -> Result<NetResponse, String> {
+    crate::plugins::ensure_caller_self_or_main(window.label(), &plugin_id)?;
+    plugin_net_fetch_with(plugin_id, url, opts)
+}
+
+/// 命令体(调用者校验后执行;与签名解耦)
+fn plugin_net_fetch_with(
     plugin_id: String,
     url: String,
     opts: Option<NetFetchOpts>,
