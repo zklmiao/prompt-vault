@@ -325,6 +325,7 @@ export const zhCN = {
   "ph.updateTitle": "更新到 {version}({channel})",
   "ph.update": "更新 {version}",
   "ph.openWindow": "打开插件窗口",
+  "ph.openPanel": "打开插件详情面板",
   "ph.toggleDisable": "停用",
   "ph.toggleEnable": "启用",
   "ph.uninstall": "卸载",

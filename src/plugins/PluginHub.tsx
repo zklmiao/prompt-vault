@@ -421,6 +421,15 @@ export default function PluginHub({
                     <IconWindow size={16} />
                   </button>
                 ) : null}
+                {panels.some((p) => p.pluginId === id) ? (
+                  <button
+                    className="icon-btn"
+                    title={t("ph.openPanel")}
+                    onClick={() => setSection(`panel:${id}`)}
+                  >
+                    <IconPlugin size={16} />
+                  </button>
+                ) : null}
                 <label className="switch" title={entry.enabled ? t("ph.toggleDisable") : t("ph.toggleEnable")}>
                   <input
                     type="checkbox"
@@ -568,19 +577,6 @@ export default function PluginHub({
           </button>
         </div>
       </div>
-      {panels.length > 0 ? (
-        <div className="ph-panel-tabs">
-          {panels.map(({ pluginId, def }) => (
-            <button
-              key={pluginId}
-              className={"ph-seg" + (section === `panel:${pluginId}` ? " active" : "")}
-              onClick={() => setSection(`panel:${pluginId}`)}
-            >
-              {def.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <div className="ph-body">
         {section === "installed" ? renderInstalled() : null}
         {section === "sources" ? renderSources() : null}

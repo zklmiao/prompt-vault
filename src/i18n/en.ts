@@ -324,6 +324,7 @@ export const en: Partial<Record<ZhKey, string>> = {
   "ph.updateTitle": "Update to {version} ({channel})",
   "ph.update": "Update {version}",
   "ph.openWindow": "Open plugin window",
+  "ph.openPanel": "Open plugin details panel",
   "ph.toggleDisable": "Disable",
   "ph.toggleEnable": "Enable",
   "ph.uninstall": "Uninstall",
