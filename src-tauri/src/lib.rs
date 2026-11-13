@@ -13,6 +13,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod credentials;
+mod net;
 
 /// 首次启动时建议的数据文件位置(按共识默认指向工程内 data 目录)
 const DEFAULT_DATA_PATH: &str = r"E:\Agent\Proj\prompt-vault\data\prompts.json";
@@ -572,7 +573,8 @@ pub fn run() {
             win_toggle_maximize,
             win_close,
             credentials::plugin_credential_set,
-            credentials::plugin_credential_delete
+            credentials::plugin_credential_delete,
+            net::plugin_net_fetch
         ])
         .setup(move |app| {
             // 恢复上次记住的主窗口位置与大小

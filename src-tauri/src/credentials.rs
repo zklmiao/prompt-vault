@@ -20,8 +20,6 @@ pub(crate) trait KeyringBackend: Send + Sync {
     /// 删除;条目不存在时也应返回成功(幂等)
     fn delete(&self, scope: &str) -> Result<(), String>;
     /// 仅限 Rust 内部拼装网络认证时调用,绝不作为命令暴露给 JS
-    // (临时 allow:本提交仅落地凭据服务,读取方在 net.rs 网络代理中接入后移除)
-    #[allow(dead_code)]
     fn get(&self, scope: &str) -> Result<Option<String>, String>;
 }
 
