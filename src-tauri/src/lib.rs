@@ -13,6 +13,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod data_lock;
+mod data_watch;
 mod fuzzy;
 mod mcp;
 
@@ -243,10 +244,13 @@ fn get_data_path() -> Option<String> {
 }
 
 #[tauri::command]
-fn set_data_path(path: String) -> Result<(), String> {
+fn set_data_path(app: AppHandle, path: String) -> Result<(), String> {
     let mut cfg = read_config();
-    cfg.data_path = Some(path);
-    write_config(&cfg)
+    cfg.data_path = Some(path.clone());
+    write_config(&cfg)?;
+    // 挂点:数据文件变更监听跟随新路径重启(仅成功后)
+    data_watch::restart(&app, PathBuf::from(&path));
+    Ok(())
 }
 
 /// 返回当前热键配置;配置文件里损坏(无法解析)时回退默认值
@@ -595,6 +599,11 @@ pub fn run() {
                     let _ = window.set_position(PhysicalPosition::new(wr.x, wr.y));
                     let _ = window.set_size(PhysicalSize::new(wr.width, wr.height));
                 }
+            }
+
+            // 挂点:数据文件变更监听(外部写入如 MCP save_prompt → data-changed)
+            if let Some(dp) = cfg.data_path.clone() {
+                data_watch::start(app.handle(), PathBuf::from(dp));
             }
 
             // 注册全局快捷键:配置优先,解析/注册失败回退默认并自愈配置
