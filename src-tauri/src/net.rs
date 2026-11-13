@@ -70,14 +70,8 @@ fn validate_url(input: &str) -> Result<Url, String> {
 
 /// 插件数据目录下的 plugins.json(与 lib.rs 的 config.json 同目录)
 fn plugins_file_path() -> PathBuf {
-    let base = std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .or_else(|_| {
-            std::env::var("USERPROFILE")
-                .map(|h| PathBuf::from(h).join("AppData").join("Roaming"))
-        })
-        .unwrap_or_else(|_| PathBuf::from("."));
-    base.join("prompt-vault").join("plugins.json")
+    // plugins.json 与 config.json 同目录(D6),复用 lib.rs 的统一推导
+    crate::config_file_path().with_file_name("plugins.json")
 }
 
 /// 防御式解析 plugins.json,取 `installed[<plugin_id>]` 安装时快照的 permissions 数组。
