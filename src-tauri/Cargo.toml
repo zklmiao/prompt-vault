@@ -25,6 +25,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Windows 凭据管理器封装(插件系统凭据服务,keyring 3 无默认 feature,按平台显式开启)
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
