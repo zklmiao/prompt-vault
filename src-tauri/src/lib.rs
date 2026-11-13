@@ -500,6 +500,16 @@ fn hide_quickpick(app: AppHandle) {
     }
 }
 
+/// 本机应用 exe 绝对路径(MCP 面板四页签片段自动填充;main-only)。
+/// dev 构建返回 target\debug\ 路径属正确行为——片段模板拼的就是「当前这个 exe」。
+#[tauri::command]
+fn app_exe_path(window: tauri::WebviewWindow) -> Result<String, String> {
+    plugins::ensure_caller_main(window.label())?;
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| format!("获取应用路径失败:{e}"))
+}
+
 /// 从快速拾取窗口跳到主窗口并进入指定条目的编辑态
 #[tauri::command]
 fn open_editor(app: AppHandle, id: String) {
@@ -591,6 +601,7 @@ pub fn run() {
             first_run_default,
             hide_quickpick,
             open_editor,
+            app_exe_path,
             win_minimize,
             win_is_maximized,
             win_toggle_maximize,
