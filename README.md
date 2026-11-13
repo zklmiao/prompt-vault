@@ -13,7 +13,7 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 <img src="docs/screenshots/detail-dark.png" width="86%" alt="Prompt Vault 主界面" />
 
-<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.2--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.2.0--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
 
 </div>
 
@@ -46,6 +46,7 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 | 🗑 | **回收站** | 删除先进回收站可随时恢复，彻底删除才二次确认 |
 | ☑️ | **批量操作** | 多选后批量加标签、批量移入回收站/恢复、批量导出所选（Ctrl/Shift 多选、Ctrl+A 全选、Esc 取消） |
 | 🎨 | **体验** | 自绘标题栏、暗色/亮色主题（跟随系统）、托盘常驻、窗口位置记忆、详情切换级联淡入、**中文输入法组字安全**（拼音选字按 Enter 不会误触发业务动作）、全中文界面 |
+| 🔌 | **插件系统** | 仓库源（GitHub/Gitee/GitLab/自建 Gitea）+ 市场安装（sha256 校验、zip-slip 与解压限额防护、权限逐条确认）；Token 用量圆球悬浮窗（GLM/火山方舟/OpenCode）、i18n 语言包、MCP Server（`--mcp` 供 AI 客户端检索收藏）；界面中英文切换 |
 | 💾 | **数据安全** | 单 JSON 文件 + 原子写入 + 每次写入前自动 `.bak` 备份，损坏时可一键恢复 |
 
 ---
@@ -113,10 +114,12 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 | `PromptVault-0.1.9.2-alpha-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
 | `PromptVault-0.1.9.2-alpha-regression-report.md` | 该版本的全量程序化测试报告 |
 
+> 0.2.0-alpha 的 GitHub Release 发布待手动执行（本地 `releases/` 已含构建产物）。
+
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
 
-> 当前源码版本为 **0.1.9.2-alpha**（清单内为合法 semver `0.1.9-alpha.2`），为预发布（pre-release）；稳定版仍为 `v0.1.0`。
+> 当前源码版本为 **0.2.0-alpha**（tauri.conf.json / package.json / Cargo.toml 三处一致），为预发布（pre-release）；稳定版仍为 `v0.1.0`。
 
 ### 方式二：从源码构建
 
@@ -139,8 +142,8 @@ npm run tauri build
 - **所有数据只存在本地**：一个 JSON 文件，内容完全透明，随时可用任意编辑器查看
 - **原子写入**：临时文件 `sync` 落盘后经 `MoveFileEx(REPLACE_EXISTING)` 原地替换，不存在写一半的中间态
 - **自动备份**：每次写入前旧文件保存为 `prompts.json.bak`；数据解析失败时应用暂停读写，并可一键从 `.bak` 恢复
-- **配置同样本地**：`%APPDATA%\prompt-vault\config.json` 只保存数据文件路径、窗口位置与全局热键，不包含收藏内容
-- **无网络请求**：应用不发起任何外部请求，不采集任何信息
+- **配置同样本地**：`%APPDATA%\prompt-vault\config.json` 只保存数据文件路径、窗口位置与全局热键，不包含收藏内容；插件状态独立存放于 `plugins.json`、`plugins\` 与 `locales\` 目录
+- **核心离线**：核心功能不发起任何外部请求，不采集任何信息；插件按需联网（经 Rust 代理：host 白名单 + SSRF 防护 + 调用者校验）
 
 数据文件结构：
 
@@ -198,6 +201,8 @@ prompt-vault/
 │  ├─ components/              # TitleBar / Sidebar / DetailPane / CommandPalette /
 │  │                           # CheatsheetModal / Onboarding / BatchPanel / SettingsModal …
 │  ├─ util.ts                  # 模糊匹配、占位符解析、数据纠偏、热键格式化
+│  ├─ plugins/                 # 插件宿主:pv 桥、注入引擎、插件区 UI、i18n 语言包消费
+│  ├─ i18n/                    # i18n 运行时:t()、语言切换、zh-CN fallback
 │  ├─ theme.ts / window.ts     # 主题与窗口模式(含浏览器预览分流)
 │  ├─ api.ts                   # Tauri API 封装
 │  └─ App.css                  # 主题令牌(亮/暗)+ 全部样式
@@ -274,6 +279,7 @@ npx vite --config preview/vite.preview.config.ts
 - [x] 拖拽导入 / 批量操作 / 使用统计
 - [x] 命令面板（`Ctrl+K`）与快捷键速查表（`?`）
 - [x] 首次启动引导 / 详情级联淡入 / 中文输入法组字保护
+- [x] 插件系统 v1（仓库源与市场安装、Token 用量圆球、i18n 语言包、MCP Server；详见 [docs/plugin-system-design.md](docs/plugin-system-design.md)）
 - [ ] 占位符实时预览、搜索命中片段、右键菜单、标签配色（详见 [docs/backlog.md](docs/backlog.md)）
 - [x] 发布 v0.1.9 系列预发布（v0.1.9-alpha → v0.1.9.2-alpha，附回归测试报告；正式 Release 待定）
 - [ ] 数据量过千后评估 SQLite + FTS5
