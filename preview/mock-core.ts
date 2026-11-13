@@ -1,6 +1,8 @@
 // 浏览器预览夹具:拦截 @tauri-apps/api/core 的 invoke,
 // 用内存数据模拟 Rust 侧命令,让 UI 能在纯浏览器里跑起来(仅开发预览用,不参与构建)
 import type { DataFile } from "../src/types";
+// token-monitor 真源以文本注入夹具:预览走查跑的是插件真实解析路径(批次 3)
+import tokenMonitorMain from "../plugins-src/token-monitor/main.js?raw";
 
 const seed: DataFile = {
   version: 1,
@@ -202,14 +204,36 @@ const MOCK_MANIFESTS: Record<string, Record<string, unknown>> = {
     // 含一个非法码("bad code!"):宿主应跳过并 console.warn,不影响合法码
     languages: ["en", "zh-CN", "bad code!"],
   },
+  // 批次 3:真实 manifest(与 plugins-src/token-monitor/manifest.json 一致)
+  // 注意 minAppVersion 0.2.0 > 应用版本:真实安装仍被版本门拒(批次 5 升版本,记偏差);
+  // 预览 mock 无版本门,可直接从市场安装
+  "token-monitor": {
+    id: "token-monitor",
+    name: "Coding 套餐用量监控",
+    version: "1.0.0",
+    minAppVersion: "0.2.0",
+    type: "standard",
+    ui: "window",
+    permissions: [
+      "net:open.bigmodel.cn",
+      "net:ark.cn-beijing.volcengineapi.com",
+      "net:opencode.ai",
+      "credential:glm",
+      "credential:volcengine",
+      "credential:opencode",
+      "window:float",
+    ],
+  },
 };
 
 /**
  * 假插件的包内文件(pv-1:plugin_read_entry 返回源码,宿主包进 IIFE 内联执行,
  * 假插件在预览里可真实注入)。两个插件用于对抗性验证:
  *   - demo-hello(探针 A):顶层捕获桥 → 延迟 400ms(晚于 demo-clock 注入)后
- *     写 KV,断言记录落在 A 自己的 pluginId 下;
+ *     写 KV,断言记录落在 A 自己的 pluginId 下;另有越权探针:未声明凭据/网络
+ *     权限时 credentials.set 与 net.fetch 必须被拒,结果落 KV 供走查断言;
  *   - demo-clock(B):注入时立即注册面板。
+ * token-monitor 为真实插件源码(?raw 导入),预览走查走真实解析路径。
  * 源码均为 pv-1 形态:只写 IIFE 函数体,直接使用闭包参数 pv,不引用 window.pv。
  */
 const MOCK_PLUGIN_SOURCES: Record<string, Record<string, string>> = {
@@ -229,6 +253,29 @@ window.setTimeout(function () {
     from: mine.pluginId,
     bridgeVersion: mine.version,
     at: new Date().toISOString()
+  });
+}, 400);
+// 越权探针(批次 3):demo-hello 只声明 net:example.com + window:float,
+// 凭据/越权网络调用必须 fail-closed 被拒,结果落 KV 供预览走查断言
+window.setTimeout(function () {
+  mine.credentials.set('glm', 'test-ak-1234').then(function () {
+    return mine.storage.set('probe-perm-cred', { denied: false });
+  }).catch(function (err) {
+    return mine.storage.set('probe-perm-cred', {
+      denied: true,
+      message: String((err && err.message) || err)
+    });
+  });
+  mine.net.fetch('https://open.bigmodel.cn/api/monitor/usage/quota/limit', {
+    authFrom: 'credential:glm',
+    mode: 'raw'
+  }).then(function () {
+    return mine.storage.set('probe-perm-net', { denied: false });
+  }).catch(function (err) {
+    return mine.storage.set('probe-perm-net', {
+      denied: true,
+      message: String((err && err.message) || err)
+    });
   });
 }, 400);
 `,
@@ -257,6 +304,10 @@ pv.panel.register({
       "toast.copied": "已复制到剪贴板(语言包)",
       "toast.copiedFilled": "已复制到剪贴板(语言包,变量已填充)",
     }),
+  },
+  // 批次 3:真实插件源码(?raw 导入,单文件)
+  "token-monitor": {
+    "main.js": tokenMonitorMain,
   },
 };
 
@@ -323,6 +374,27 @@ const MOCK_MARKET: {
       beta: null,
       minAppVersion: "0.1.0",
       permissions: [],
+    },
+    {
+      id: "token-monitor",
+      name: "Coding 套餐用量监控",
+      desc: "GLM / 火山方舟 / OpenCode 用量圆球(预览罐头数据)",
+      release: {
+        version: "1.0.0",
+        url: "https://mock.local/token-monitor-1.0.0.zip",
+        sha256: "ee".repeat(32),
+      },
+      beta: null,
+      minAppVersion: "0.2.0",
+      permissions: [
+        "net:open.bigmodel.cn",
+        "net:ark.cn-beijing.volcengineapi.com",
+        "net:opencode.ai",
+        "credential:glm",
+        "credential:volcengine",
+        "credential:opencode",
+        "window:float",
+      ],
     },
   ],
 };
@@ -455,14 +527,96 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
       return null;
     }
     case "plugin_open_window":
-      console.log("[mock] plugin_open_window", args?.pluginId, args?.width, args?.height);
+      console.log(
+        "[mock] plugin_open_window",
+        args?.pluginId,
+        "size:",
+        args?.width,
+        "x",
+        args?.height,
+        "pos:",
+        args?.x,
+        args?.y,
+      );
       return null;
     case "plugin_close_window":
       console.log("[mock] plugin_close_window", args?.pluginId);
       return null;
-    case "plugin_net_fetch":
-      console.log("[mock] plugin_net_fetch", args?.pluginId, args?.url);
-      return { status: 200, body: "{}" };
+    case "plugin_show_main_panel":
+      // 真实实现经 Rust show main + emit pv-open-plugin-panel;预览无独立窗口,
+      // 由走查用例在主窗口直接切插件分栏验证面板内容
+      console.log("[mock] plugin_show_main_panel", args?.pluginId);
+      return null;
+    case "plugin_resize_window":
+      console.log("[mock] plugin_resize_window", args?.pluginId, args?.width, "x", args?.height);
+      return null;
+    /* ---- 凭据 mock:只记「已配置」状态,不存任何可用秘密(红线) ---- */
+    case "plugin_credential_set": {
+      const scope = String(args?.scope ?? "");
+      const secret = String(args?.secret ?? "");
+      if (!/^[a-z0-9-]{1,32}$/.test(scope)) {
+        throw new Error("scope 只能包含小写字母、数字和连字符(1-32 位)");
+      }
+      if (secret === "") throw new Error("凭据内容不能为空");
+      const creds = loadMockCreds();
+      creds[scope] = "mock"; // 占位标记:仅存在性语义,非可用凭据
+      saveMockCreds(creds);
+      console.log("[mock] plugin_credential_set", scope);
+      return null;
+    }
+    case "plugin_credential_delete": {
+      const scope = String(args?.scope ?? "");
+      if (!/^[a-z0-9-]{1,32}$/.test(scope)) {
+        throw new Error("scope 只能包含小写字母、数字和连字符(1-32 位)");
+      }
+      const creds = loadMockCreds();
+      delete creds[scope];
+      saveMockCreds(creds);
+      console.log("[mock] plugin_credential_delete", scope);
+      return null;
+    }
+    case "plugin_credential_configured": {
+      const scope = String(args?.scope ?? "");
+      return scope in loadMockCreds();
+    }
+    case "plugin_net_fetch": {
+      const pluginId = String(args?.pluginId ?? "");
+      const url = String(args?.url ?? "");
+      const opts = (args?.opts ?? {}) as {
+        authFrom?: string;
+        mode?: string;
+      };
+      // ① host 白名单:与 Rust 一致,读 plugins.json installed[pluginId].permissions 快照
+      const permissions = mockPlugins.installed[pluginId]?.permissions ?? [];
+      let host = "";
+      try {
+        host = new URL(url).host;
+      } catch {
+        throw new Error("[mock] URL 不合法");
+      }
+      if (!permissions.includes(`net:${host}`)) {
+        throw new Error("插件未声明该网络权限");
+      }
+      // ② authFrom/mode 成对 + credential scope 门控(与 Rust plugin_net_fetch 同语义)
+      if ((opts.authFrom != null) !== (opts.mode != null)) {
+        throw new Error("authFrom 与 mode 必须同时提供");
+      }
+      if (opts.authFrom != null) {
+        if (!opts.authFrom.startsWith("credential:")) {
+          throw new Error("authFrom 仅支持 credential:<scope> 形式");
+        }
+        const scope = opts.authFrom.slice("credential:".length);
+        if (!permissions.includes(`credential:${scope}`)) {
+          throw new Error("插件未声明该凭据权限");
+        }
+        if (!(scope in loadMockCreds())) {
+          throw new Error(`未找到 ${scope} 凭据:请先在设置中录入(预览无环境变量通道)`);
+        }
+      }
+      // ③ SSRF 校验在 Rust 侧:预览罐头无真实网络,不做 DNS 判定(记偏差)
+      console.log("[mock] plugin_net_fetch", pluginId, url);
+      return { status: 200, body: mockCannedNetBody(url) };
+    }
     /* ---- i18n 手动语言包目录 mock:localStorage "pv-mock-locales" =
        Record<语言码, 目录> 即模拟 locales\<码>.json 文件 ---- */
     case "i18n_locales": {
@@ -488,4 +642,73 @@ function loadMockLocales(): Record<string, Record<string, string>> {
   } catch {
     return {};
   }
+}
+
+/* ===== 批次 3:凭据 mock 存储 + 三家罐头响应(附录 A 真实形状) ===== */
+
+/** mock 凭据:localStorage "pv-mock-creds" = Record<scope, "mock">;
+ *  值恒为占位标记,不含任何可用秘密(凭据红线) */
+function loadMockCreds(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem("pv-mock-creds");
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveMockCreds(creds: Record<string, string>): void {
+  try {
+    localStorage.setItem("pv-mock-creds", JSON.stringify(creds));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 三家罐头响应:按 URL 形状分发,字段形状逐条对应设计文档附录 A(2026-11 核实) */
+function mockCannedNetBody(url: string): string {
+  const now = Date.now();
+  if (url.includes("/api/monitor/usage/quota/limit")) {
+    // GLM:limits[] TOKENS_LIMIT 两条(nextResetTime 毫秒,升序 [0]=5h、[1]=周)+
+    // TIME_LIMIT(实为 MCP 月度,currentValue/usage/remaining)
+    return JSON.stringify({
+      data: {
+        level: "pro",
+        limits: [
+          { type: "TOKENS_LIMIT", percentage: 23.5, nextResetTime: now + 2 * 3600e3 + 13 * 60e3 },
+          { type: "TOKENS_LIMIT", percentage: 61.2, nextResetTime: now + 3 * 24 * 3600e3 },
+          { type: "TIME_LIMIT", currentValue: 800, usage: 230, remaining: 570 },
+        ],
+      },
+    });
+  }
+  if (url.includes("/api/monitor/usage/model-usage")) {
+    // GLM:tokensUsage 小时桶(对象桶按数值字段求和出 24h 聚合)
+    const buckets = [] as Array<{ input: number; output: number }>;
+    for (let i = 0; i < 8; i++) {
+      buckets.push({ input: 1200 + i * 100, output: 3400 + i * 150 });
+    }
+    return JSON.stringify({ data: { x_time: buckets.map((_, i) => `hour-${i}`), tokensUsage: buckets } });
+  }
+  if (url.includes("Action=GetAFPUsage")) {
+    // 火山:Result.AFPFiveHour/AFPWeekly { Quota, Used, ResetTime(秒级时间戳) },
+    // 接口不给百分比,由 parseVolcUsage 按 Used/Quota 自算
+    return JSON.stringify({
+      Result: {
+        AFPFiveHour: { Quota: "50.0", Used: "12.5", ResetTime: Math.floor((now + 90 * 60e3) / 1000) },
+        AFPWeekly: { Quota: "200.0", Used: "45.0", ResetTime: Math.floor((now + 3 * 24 * 3600e3) / 1000) },
+      },
+    });
+  }
+  if (url.includes("zen/go/v1/usage")) {
+    // OpenCode:usage.rolling/weekly/monthly { status, percent, resetsAt(ISO) }
+    return JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 83.3, resetsAt: new Date(now + 4 * 3600e3).toISOString() },
+        weekly: { status: "ok", percent: 42.1, resetsAt: new Date(now + 3 * 24 * 3600e3).toISOString() },
+        monthly: { status: "ok", percent: 9.9, resetsAt: new Date(now + 20 * 24 * 3600e3).toISOString() },
+      },
+    });
+  }
+  return "{}";
 }
