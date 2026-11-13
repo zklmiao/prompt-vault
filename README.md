@@ -13,7 +13,7 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 <img src="docs/screenshots/detail-dark.png" width="86%" alt="Prompt Vault 主界面" />
 
-<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.2--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.3--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
 
 </div>
 
@@ -67,6 +67,7 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 | `Space` | 主列表 | 勾选 / 取消勾选（多选） |
 | `Ctrl+Enter` | 编辑器 | 保存 |
 | `↑` `↓` / `Enter` / `Tab` / `Esc` | 快速拾取 | 选择 / 复制并关闭 / 在主窗口中编辑 / 关闭 |
+| `Ctrl+N` | 快速拾取 | 唤出主窗口新建收藏 |
 | `Esc` | 弹窗 | 取消 |
 
 > 两个全局热键可以在应用内 **设置（右上角 ⚙）** 中修改：点击输入框直接录制组合键，保存后立即生效、无需重启；若组合被其他应用占用会提示并保留旧键。
@@ -116,7 +117,7 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
 
-> 当前源码版本为 **0.1.9.2-alpha**（清单内为合法 semver `0.1.9-alpha.2`），为预发布（pre-release）；稳定版仍为 `v0.1.0`。
+> 当前源码版本为 **0.1.9.3-alpha**（清单内为合法 semver `0.1.9-alpha.3`），为预发布（pre-release）；稳定版仍为 `v0.1.0`。
 
 ### 方式二：从源码构建
 
@@ -276,6 +277,7 @@ npx vite --config preview/vite.preview.config.ts
 - [x] 首次启动引导 / 详情级联淡入 / 中文输入法组字保护
 - [ ] 占位符实时预览、搜索命中片段、右键菜单、标签配色（详见 [docs/backlog.md](docs/backlog.md)）
 - [x] 发布 v0.1.9 系列预发布（v0.1.9-alpha → v0.1.9.2-alpha，附回归测试报告；正式 Release 待定）
+- [x] 界面常驻快捷键提示 / 快速拾取 `Ctrl+N` 唤出主窗口新建（v0.1.9.3-alpha）
 - [ ] 数据量过千后评估 SQLite + FTS5
 
 ---
