@@ -201,3 +201,44 @@ export function IconRestore(p: IconProps) {
     </Svg>
   );
 }
+
+/** 插件(拼图) */
+export function IconPlugin(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9.5 4.5a2 2 0 1 1 4 0H16a1 1 0 0 1 1 1v2.5a2 2 0 1 1 0 4V15a1 1 0 0 1-1 1h-2.5a2 2 0 1 1-4 0H7a1 1 0 0 1-1-1v-3a2 2 0 1 1 0-4V5.5a1 1 0 0 1 1-1h2.5z" />
+    </Svg>
+  );
+}
+
+/** 插件市场(店铺) */
+export function IconMarket(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 9.5 5.2 4.6A1 1 0 0 1 6.2 4h11.6a1 1 0 0 1 1 .6L20 9.5" />
+      <path d="M4 9.5a2.2 2.2 0 0 0 4.3.7 2.2 2.2 0 0 0 4.3.1 2.2 2.2 0 0 0 4.3-.1 2.2 2.2 0 0 0 3.1-.7" />
+      <path d="M5 12.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6.5" />
+      <path d="M9.5 20v-5h5v5" />
+    </Svg>
+  );
+}
+
+/** 刷新(手动更新源清单) */
+export function IconRefresh(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+      <path d="M20 3v4h-4" />
+    </Svg>
+  );
+}
+
+/** 插件窗口 */
+export function IconWindow(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="4" y="6" width="16" height="12" rx="1.5" />
+      <path d="M4 10h16" />
+    </Svg>
+  );
+}

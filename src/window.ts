@@ -15,9 +15,21 @@ export function windowLabel(): string {
   }
 }
 
-/** 快速拾取窗口下把页面背景变透明,只露出圆角面板 */
+/** 插件窗口按 URL 参数 ?plugin=<id> 分流(与 Rust 侧 plugin_open_window 约定一致) */
+export function pluginWindowId(): string | null {
+  try {
+    const id = new URLSearchParams(window.location.search).get("plugin");
+    return id && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 快速拾取/插件窗口下把页面背景变透明,只露出各自面板内容 */
 export function applyWindowModeClass(): void {
   if (windowLabel() === "quickpick") {
     document.documentElement.classList.add("qp-mode");
+  } else if (pluginWindowId() !== null) {
+    document.documentElement.classList.add("pv-plugin-mode");
   }
 }

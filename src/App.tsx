@@ -34,6 +34,7 @@ import {
   serializeDataFile,
 } from "./util";
 import { applyTheme, currentTheme } from "./theme";
+import { windowLabel } from "./window";
 import Sidebar from "./components/Sidebar";
 import DetailPane from "./components/DetailPane";
 import BatchPanel from "./components/BatchPanel";
@@ -45,11 +46,19 @@ import ImportChoiceModal from "./components/ImportChoiceModal";
 import SettingsModal from "./components/SettingsModal";
 import CommandPalette, { type PaletteCommand } from "./components/CommandPalette";
 import CheatsheetModal from "./components/CheatsheetModal";
+import PluginHub from "./plugins/PluginHub";
+import {
+  bootstrapPlugins,
+  buildPluginPaletteCommands,
+} from "./plugins/host";
+import type { HostHooks } from "./plugins/host";
+import type { PluginPaletteCommand } from "./plugins/palette";
 import {
   IconClipboard,
   IconExport,
   IconImport,
   IconMoon,
+  IconPlugin,
   IconPlus,
   IconSearch,
   IconSettings,
@@ -198,6 +207,12 @@ export default function App() {
     quickpick: "alt+q",
     clipboard_new: "alt+shift+n",
   });
+  /** 主区分栏:收藏 / 插件 */
+  const [pane, setPane] = useState<"collection" | "plugins">("collection");
+  /** 插件区弹层(权限确认/卸载确认)打开时静默窗口级快捷键 */
+  const [pluginModalOpen, setPluginModalOpen] = useState(false);
+  /** 插件命令(命令面板合并展示;注入完成后刷新) */
+  const [pluginCmds, setPluginCmds] = useState<PluginPaletteCommand[]>([]);
 
   // 任一弹层打开时,窗口级列表快捷键全部静默
   const overlayOpen = !!(
@@ -207,18 +222,49 @@ export default function App() {
     batchPurgeOpen ||
     settingsOpen ||
     paletteOpen ||
-    cheatsheetOpen
+    cheatsheetOpen ||
+    pluginModalOpen
   );
 
   const dataPathRef = useRef<string | null>(null);
   const bootstrapped = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const shiftAnchor = useRef<string | null>(null);
+  /** 事件回调里读取最新编辑态(data-changed 刷新守卫) */
+  const modeRef = useRef(mode);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  const paneRef = useRef(pane);
+  useEffect(() => {
+    paneRef.current = pane;
+  }, [pane]);
 
   const showToast = useCallback((text: string, kind: "ok" | "err" = "ok") => {
     setToast({ text, kind });
     window.setTimeout(() => setToast(null), 2200);
   }, []);
+
+  const refreshPluginCommands = useCallback(() => {
+    setPluginCmds(buildPluginPaletteCommands());
+  }, []);
+
+  const pluginHostHooks = useMemo<HostHooks>(
+    () => ({
+      showToast,
+      onCommandsChanged: refreshPluginCommands,
+    }),
+    [showToast, refreshPluginCommands],
+  );
+
+  // 插件宿主:主窗口就绪后按 plugins.json enabled 顺序注入(失败隔离)
+  useEffect(() => {
+    if (!ready) return;
+    if (windowLabel() !== "main") return;
+    void bootstrapPlugins(pluginHostHooks).catch((e) => {
+      console.error("[pv] 插件宿主启动失败:", e);
+    });
+  }, [ready, pluginHostHooks]);
 
   const markOnboarded = useCallback(() => {
     setOnboarded(true);
@@ -374,6 +420,21 @@ export default function App() {
           return;
         }
         unlistens.push(u3);
+      } catch {
+        /* ignore */
+      }
+      try {
+        // 数据文件被外部写入(MCP headless / 其他进程):静默刷新;
+        // 编辑态跳过本次刷新防打断草稿,退出编辑后由既有持久化机制兜底
+        const u5 = await listen("data-changed", () => {
+          if (modeRef.current.kind !== "view") return;
+          void refreshFromDisk();
+        });
+        if (disposed) {
+          u5();
+          return;
+        }
+        unlistens.push(u5);
       } catch {
         /* ignore */
       }
@@ -994,6 +1055,8 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (isComposingEvent(e)) return;
       if (overlayOpen) return;
+      // 插件分栏下没有收藏列表,全部列表键静默
+      if (paneRef.current === "plugins") return;
       const el = e.target as HTMLElement | null;
       if (!el) return;
       const tag = el.tagName;
@@ -1106,6 +1169,16 @@ export default function App() {
     if (!path) return;
     await importFromPath(path);
   }, [importFromPath]);
+
+  /** 收藏/插件分栏切换:清空列表选择与编辑态 */
+  const switchPane = useCallback((next: "collection" | "plugins") => {
+    setPane(next);
+    setSelectedId(null);
+    setSelectedIds(new Set());
+    shiftAnchor.current = null;
+    setMode({ kind: "view" });
+    setActiveTag(null);
+  }, []);
 
   /** 原生拖放:第一个路径决定走导入(.json)还是新建文本 */
   const handleDroppedPaths = useCallback(
@@ -1359,6 +1432,14 @@ export default function App() {
         icon: <IconSettings size={15} />,
         run: closeThen(() => setSettingsOpen(true)),
       },
+      {
+        id: "open-plugins",
+        group: "应用",
+        label: "打开插件区",
+        keywords: ["plugins", "market", "plugin", "插件", "插件市场"],
+        icon: <IconPlugin size={15} />,
+        run: closeThen(() => switchPane("plugins")),
+      },
     ];
   }, [
     trashOpen,
@@ -1372,7 +1453,19 @@ export default function App() {
     toggleTrash,
     toggleTheme,
     setSortMode,
+    switchPane,
   ]);
+
+  /** 插件命令并入命令面板(group「插件」,恒加 plugin: 前缀防 id 冲突) */
+  const pluginPaletteCommands = useMemo<PaletteCommand[]>(
+    () =>
+      pluginCmds.map((c) => ({
+        ...c,
+        group: "插件",
+        icon: <IconPlugin size={15} />,
+      })),
+    [pluginCmds],
+  );
 
   if (setupFailed) {
     return (
@@ -1467,20 +1560,46 @@ export default function App() {
       </header>
 
       <div className="main">
-        <Sidebar
-          items={filtered}
-          total={trashOpen ? trashItems.length : liveItems.length}
-          trashOpen={trashOpen}
-          sortMode={sortMode}
-          onSortChange={setSortMode}
-          selectedId={selectedId}
-          selectedIds={selectedIds}
-          onRowClick={handleRowClick}
-          onRowFocus={handleRowFocus}
-          onCheckbox={toggleSelected}
-          onTagClick={handleTagClick}
-          onQuickCopy={(it) => void handleCopy(it)}
-        />
+        <nav className="pane-rail" aria-label="主区分栏">
+          <button
+            className={"pane-tab" + (pane === "collection" ? " active" : "")}
+            onClick={() => switchPane("collection")}
+            title="收藏"
+          >
+            <IconSparkles size={16} />
+            <span>收藏</span>
+          </button>
+          <button
+            className={"pane-tab" + (pane === "plugins" ? " active" : "")}
+            onClick={() => switchPane("plugins")}
+            title="插件"
+          >
+            <IconPlugin size={16} />
+            <span>插件</span>
+          </button>
+        </nav>
+        {pane === "plugins" ? (
+          <PluginHub
+            showToast={showToast}
+            onModalOpenChange={setPluginModalOpen}
+            onCommandsChanged={refreshPluginCommands}
+          />
+        ) : (
+          <>
+            <Sidebar
+              items={filtered}
+              total={trashOpen ? trashItems.length : liveItems.length}
+              trashOpen={trashOpen}
+              sortMode={sortMode}
+              onSortChange={setSortMode}
+              selectedId={selectedId}
+              selectedIds={selectedIds}
+              onRowClick={handleRowClick}
+              onRowFocus={handleRowFocus}
+              onCheckbox={toggleSelected}
+              onTagClick={handleTagClick}
+              onQuickCopy={(it) => void handleCopy(it)}
+            />
         {selectedIds.size > 0 ? (
           <BatchPanel
             count={selectedIds.size}
@@ -1525,6 +1644,8 @@ export default function App() {
                 : null
             }
           />
+        )}
+          </>
         )}
       </div>
 
@@ -1576,7 +1697,7 @@ export default function App() {
       )}
       {paletteOpen && (
         <CommandPalette
-          commands={paletteCommands}
+          commands={[...paletteCommands, ...pluginPaletteCommands]}
           onClose={() => setPaletteOpen(false)}
         />
       )}

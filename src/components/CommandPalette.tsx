@@ -29,7 +29,7 @@ interface Row {
   score: number;
 }
 
-const GROUP_ORDER = ["收藏", "视图", "应用"];
+const GROUP_ORDER = ["收藏", "视图", "应用", "插件"];
 
 function scoreCommand(
   query: string,

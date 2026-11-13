@@ -109,6 +109,126 @@ const initial: DataFile = emptyMode ? { version: 1, prompts: [] } : seed;
 
 let current = JSON.stringify(initial, null, 2);
 
+/* ===== 插件系统 mock(开工卡 G:假源 + 可装可卸的假插件)===== */
+
+// 插件状态用 localStorage 持久化:停用/卸载会触发页面 reload,
+// 内存态会丢,持久化才能让预览走查完整走通生命周期
+interface MockInstalled {
+  version: string;
+  channel: "release" | "beta";
+  enabled: boolean;
+  sha256: string;
+  installedAt: string;
+  error: string | null;
+  permissions: string[];
+}
+
+interface MockPluginsState {
+  version: number;
+  sources: Array<{
+    id: string;
+    name: string;
+    provider: string;
+    url: string;
+    branch: string | null;
+  }>;
+  activeSourceId: string | null;
+  installed: Record<string, MockInstalled>;
+  mcp: { enabled: boolean };
+}
+
+function loadMockPlugins(): MockPluginsState {
+  const fallback: MockPluginsState = {
+    version: 1,
+    sources: [
+      {
+        id: "official",
+        name: "官方插件源(预览)",
+        provider: "github",
+        url: "https://github.com/prompt-vault/plugins",
+        branch: null,
+      },
+    ],
+    activeSourceId: "official",
+    installed: {},
+    mcp: { enabled: false },
+  };
+  try {
+    const raw = localStorage.getItem("pv-mock-plugins");
+    return raw ? (JSON.parse(raw) as MockPluginsState) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+let mockPlugins = loadMockPlugins();
+
+function saveMockPlugins(): void {
+  try {
+    localStorage.setItem("pv-mock-plugins", JSON.stringify(mockPlugins));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 假插件的包内 manifest(安装后由 plugin_installed_manifest 返回) */
+const MOCK_MANIFESTS: Record<string, Record<string, unknown>> = {
+  "demo-hello": {
+    id: "demo-hello",
+    name: "演示插件(预览)",
+    version: "1.0.0",
+    minAppVersion: "0.1.0",
+    type: "standard",
+    ui: "none",
+    permissions: ["net:example.com", "window:float"],
+  },
+};
+
+interface MockChannel {
+  version: string;
+  url: string;
+  sha256: string;
+}
+
+// 形状与 Rust parse_source_manifest 的输出一致:release/beta 为扁平顶层字段
+const MOCK_MARKET: {
+  name: string;
+  plugins: Array<{
+    id: string;
+    name: string;
+    desc: string;
+    release: MockChannel | null;
+    beta: MockChannel | null;
+    minAppVersion: string;
+    permissions: string[];
+  }>;
+} = {
+  name: "官方插件源(预览)",
+  plugins: [
+    {
+      id: "demo-hello",
+      name: "演示插件",
+      desc: "可安装/停用/卸载的假插件,用于预览走查",
+      release: {
+        version: "1.0.0",
+        url: "https://mock.local/demo-hello-1.0.0.zip",
+        sha256: "aa".repeat(32),
+      },
+      beta: {
+        version: "1.1.0-beta.1",
+        url: "https://mock.local/demo-hello-1.1.0-beta.1.zip",
+        sha256: "bb".repeat(32),
+      },
+      minAppVersion: "0.1.0",
+      permissions: ["net:example.com", "window:float"],
+    },
+  ],
+};
+
+function mockNowIso(): string {
+  return new Date().toISOString();
+}
+
 export async function invoke(cmd: string, args?: Record<string, unknown>) {
   switch (cmd) {
     case "get_data_path":
@@ -153,7 +273,97 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     case "open_editor":
       console.log("[mock] open_editor", args?.id);
       return null;
+    /* ---- 插件系统命令 ---- */
+    case "plugin_read_state":
+      return JSON.stringify(mockPlugins, null, 2);
+    case "plugin_write_state": {
+      const parsed = JSON.parse(String(args?.json ?? "{}")) as MockPluginsState;
+      if (!parsed.installed || typeof parsed.installed !== "object") {
+        throw new Error("[mock] plugins.json 缺少 installed 对象");
+      }
+      mockPlugins = parsed;
+      saveMockPlugins();
+      console.log("[mock] plugin_write_state");
+      return null;
+    }
+    case "plugin_fetch_source":
+      console.log("[mock] plugin_fetch_source", args?.provider, args?.owner, args?.repo);
+      return JSON.parse(JSON.stringify(MOCK_MARKET));
+    case "plugin_install": {
+      const id = String(args?.expectId ?? "");
+      const entry = MOCK_MARKET.plugins.find((p) => p.id === id);
+      if (!entry) throw new Error(`[mock] 安装失败:清单中无 ${id}`);
+      const channel = args?.channel === "beta" ? "beta" : "release";
+      const ref = entry[channel];
+      if (!ref) throw new Error("[mock] 安装失败:该通道无可用包");
+      if (!args?.sha256 || String(args.sha256).length !== 64) {
+        throw new Error("[mock] 安装失败:sha256 不合法(演示校验失败路径)");
+      }
+      const prev = mockPlugins.installed[id];
+      mockPlugins.installed[id] = {
+        version: String(args?.expectVersion ?? ref.version),
+        channel,
+        enabled: prev ? prev.enabled : true,
+        sha256: String(args?.sha256 ?? ""),
+        installedAt: mockNowIso(),
+        error: null,
+        permissions: [...entry.permissions],
+      };
+      saveMockPlugins();
+      console.log("[mock] plugin_install", id, channel);
+      return { ok: true };
+    }
+    case "plugin_uninstall": {
+      const id = String(args?.id ?? "");
+      delete mockPlugins.installed[id];
+      saveMockPlugins();
+      console.log("[mock] plugin_uninstall", id);
+      return null;
+    }
+    case "plugin_installed_manifest": {
+      const id = String(args?.pluginId ?? "");
+      return (MOCK_MANIFESTS[id] as Record<string, unknown> | undefined) ?? null;
+    }
+    case "plugin_entry_path":
+      // 预览无真实文件:返回 null,让注入走失败隔离路径(标记 error + toast)
+      return null;
+    case "plugin_kv_get": {
+      try {
+        const raw = localStorage.getItem(`pv-mock-kv:${String(args?.pluginId ?? "")}`);
+        const obj = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        return obj[String(args?.key ?? "")] ?? null;
+      } catch {
+        return null;
+      }
+    }
+    case "plugin_kv_set": {
+      const key = `pv-mock-kv:${String(args?.pluginId ?? "")}`;
+      let obj: Record<string, unknown> = {};
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) obj = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+      obj[String(args?.key ?? "")] = args?.value ?? null;
+      localStorage.setItem(key, JSON.stringify(obj));
+      return null;
+    }
+    case "plugin_open_window":
+      console.log("[mock] plugin_open_window", args?.pluginId, args?.width, args?.height);
+      return null;
+    case "plugin_close_window":
+      console.log("[mock] plugin_close_window", args?.pluginId);
+      return null;
+    case "plugin_net_fetch":
+      console.log("[mock] plugin_net_fetch", args?.pluginId, args?.url);
+      return { status: 200, body: "{}" };
     default:
       throw new Error(`[mock] unknown command: ${cmd}`);
   }
+}
+
+/** 文件路径 → asset 协议 URL 的 mock(注入走不到真实文件,保持形状一致) */
+export function convertFileSrc(filePath: string, protocol = "asset"): string {
+  return `${protocol}-mock:///${encodeURIComponent(filePath)}`;
 }
