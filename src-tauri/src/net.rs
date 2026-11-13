@@ -420,9 +420,26 @@ fn load_credential(
     }
 }
 
-/// 运行时环境变量读取;空串视为未设置
-fn real_env(name: &str) -> Option<String> {
+/// 运行时环境变量读取;空串视为未设置(credential configured 查询共用)
+pub(crate) fn real_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
+}
+
+/// scope 的凭据环境变量是否已配置:单值 Key 非空;volcengine 为 AK/SK 双值,
+/// 两者都非空才算配置。命名与空串语义与 load_credential 完全一致(getenv 注入便于单测)。
+pub(crate) fn credential_env_configured_with(
+    scope: &str,
+    getenv: &dyn Fn(&str) -> Option<String>,
+) -> bool {
+    if !scope_valid(scope) {
+        return false;
+    }
+    let not_empty = |v: &Option<String>| v.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+    if scope == "volcengine" {
+        return not_empty(&getenv("PROMPT_VAULT_VOLCENGINE_AK"))
+            && not_empty(&getenv("PROMPT_VAULT_VOLCENGINE_SK"));
+    }
+    not_empty(&getenv(&single_key_env_name(scope)))
 }
 
 // ---------- 命令 ----------

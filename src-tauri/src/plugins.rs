@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// HTTP 整体超时(与 net.rs 保持一致)
 const HTTP_TIMEOUT_SECS: u64 = 15;
@@ -1176,13 +1176,17 @@ pub fn plugin_installed_manifest(plugin_id: String) -> Result<Option<Value>, Str
 }
 
 /// 打开插件专属窗口(label = pv-plugin-<id>;已存在则唤起)。
-/// 尺寸由宿主传入(来自插件 pv.window.setup 声明),缺省 320×240。
+/// 尺寸由宿主传入(来自插件 pv.window.setup 声明),缺省 320×240;
+/// x/y 为记忆位置(物理像素,Rust 拖动防抖写入 kv),有值则先 set_position 后 show
+/// 防闪跳;无值维持主窗内偏移的缺省定位。
 #[tauri::command]
 pub fn plugin_open_window(
     app: tauri::AppHandle,
     plugin_id: String,
     width: Option<f64>,
     height: Option<f64>,
+    x: Option<i32>,
+    y: Option<i32>,
 ) -> Result<(), String> {
     ensure_plugin_id(&plugin_id)?;
     let label = format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}");
@@ -1210,19 +1214,61 @@ pub fn plugin_open_window(
     .skip_taskbar(true)
     .resizable(false)
     .shadow(false)
-    .inner_size(width, height);
-    // 尽力跟随主窗口居中,失败用系统默认位置
-    if let Some(main) = app.get_webview_window(crate::MAIN_LABEL) {
-        if let (Ok(pos), Ok(size)) = (main.outer_position(), main.inner_size()) {
-            let scale = main.scale_factor().unwrap_or(1.0);
-            let x = pos.x as f64 + (size.width as f64 / scale - width) / 2.0;
-            let y = pos.y as f64 + (size.height as f64 / scale - height) / 2.0;
-            builder = builder.position(x.max(0.0), y.max(0.0));
+    .inner_size(width, height)
+    // 隐藏构建:定位完成后再 show,记忆位置路径不闪跳
+    .visible(false);
+    if x.is_none() || y.is_none() {
+        // 缺省定位:尽力跟随主窗口居中,失败用系统默认位置
+        if let Some(main) = app.get_webview_window(crate::MAIN_LABEL) {
+            if let (Ok(pos), Ok(size)) = (main.outer_position(), main.inner_size()) {
+                let scale = main.scale_factor().unwrap_or(1.0);
+                let x = pos.x as f64 + (size.width as f64 / scale - width) / 2.0;
+                let y = pos.y as f64 + (size.height as f64 / scale - height) / 2.0;
+                builder = builder.position(x.max(0.0), y.max(0.0));
+            }
         }
     }
     builder
         .build()
         .map_err(|e| format!("创建插件窗口失败:{e}"))?;
+    if let Some(window) = app.get_webview_window(&label) {
+        if let (Some(px), Some(py)) = (x, y) {
+            let _ = window.set_position(tauri::PhysicalPosition::new(px, py));
+        }
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+/// 调整插件窗口尺寸(逻辑像素;球窗右键菜单临时扩窗,收起后由插件恢复 84×84)
+#[tauri::command]
+pub fn plugin_resize_window(
+    app: tauri::AppHandle,
+    plugin_id: String,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    ensure_plugin_id(&plugin_id)?;
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return Err("窗口尺寸需为正数".to_string());
+    }
+    let label = format!("{PLUGIN_WINDOW_PREFIX}{plugin_id}");
+    let Some(window) = app.get_webview_window(&label) else {
+        return Err("插件窗口不存在".to_string());
+    };
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| format!("调整插件窗口尺寸失败:{e}"))
+}
+
+/// 球窗唤出主窗口并激活本插件详情面板:show main → emit pv-open-plugin-panel
+/// (payload = plugin_id,主窗口切插件分栏并打开对应页签)
+#[tauri::command]
+pub fn plugin_show_main_panel(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
+    ensure_plugin_id(&plugin_id)?;
+    crate::show_main_window(&app);
+    let _ = app.emit_to(crate::MAIN_LABEL, "pv-open-plugin-panel", plugin_id);
     Ok(())
 }
 
@@ -1234,6 +1280,64 @@ pub fn plugin_close_window(app: tauri::AppHandle, plugin_id: String) {
             let _ = w.close();
         }
     }
+}
+
+/* ---------- 球窗位置持久化(Rust 独占写,插件 JS 不感知) ---------- */
+
+/// 拖动防抖静默期:最后一次 Moved 后 300ms 无新事件才落盘
+const POSITION_SAVE_DEBOUNCE_MS: u64 = 300;
+
+/// 在途防抖计时器登记:label → 已派生计时器( Mutex<Option<Map> 以便 const 初始化)
+static POSITION_SAVE_PENDING: std::sync::Mutex<Option<BTreeMap<String, ()>>> =
+    std::sync::Mutex::new(None);
+
+/// Moved 事件挂点(lib.rs on_window_event 调用):每 label 一个在途计时器,
+/// 首个 Moved 派生防抖线程,静默期内的后续 Moved 不重复派生 —— 计时器到点时
+/// 重新读取窗口当前位置落盘,天然收敛到最终位置。
+pub(crate) fn schedule_plugin_position_save(app: tauri::AppHandle, label: String) {
+    let Some(plugin_id) = label.strip_prefix(PLUGIN_WINDOW_PREFIX).map(str::to_string) else {
+        return;
+    };
+    let Ok(mut pending) = POSITION_SAVE_PENDING.lock() else {
+        return; // Mutex 中毒:放弃本次落盘(下次 Moved 重试)
+    };
+    let map = pending.get_or_insert_with(BTreeMap::new);
+    if map.contains_key(&label) {
+        return; // 已有计时器在途,静默期内不重复派生
+    }
+    map.insert(label.clone(), ());
+    drop(pending);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(POSITION_SAVE_DEBOUNCE_MS));
+        // 先摘除在途登记再落盘:落盘期间的新 Moved 会派生新计时器,最终收敛
+        if let Ok(mut pending) = POSITION_SAVE_PENDING.lock() {
+            if let Some(map) = pending.as_mut() {
+                map.remove(&label);
+            }
+        }
+        // 窗口可能已关闭:静默跳过(此前拖动过的位置已在此前轮落盘)
+        let Some(window) = app.get_webview_window(&label) else {
+            return;
+        };
+        if let Ok(pos) = window.outer_position() {
+            let root = PluginRoot::discover();
+            let _ = persist_window_position(&root, &plugin_id, pos.x, pos.y);
+        }
+    });
+}
+
+/// 把插件窗口位置写入该插件 kv.json 的 window:x / window:y(物理像素)。
+/// 复用沙箱 KV 的读写函数直接落盘,不经 IPC;插件 JS 不读写这两个键。
+fn persist_window_position(
+    root: &PluginRoot,
+    plugin_id: &str,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    ensure_plugin_id(plugin_id)?;
+    let path = root.data_dir(plugin_id).join("kv.json");
+    kv_write(&path, "window:x", json!(x))?;
+    kv_write(&path, "window:y", json!(y))
 }
 
 /* ---------- 测试 ---------- */
@@ -1865,6 +1969,28 @@ mod tests {
         let big = "x".repeat(64 * 1024 + 1);
         assert!(kv_write(&path, "big", json!(big)).is_err(), "超限值应被拒绝");
         assert!(!path.exists(), "被拒绝的写入不应产生文件");
+    }
+
+    /// Moved 位置落盘(Moved 防抖事件链本身人工验):persist_window_position
+    /// 应把物理像素坐标写进该插件 kv.json 的 window:x / window:y,且不破坏既有键
+    #[test]
+    fn persist_window_position_writes_kv_xy() {
+        let dir = std::env::temp_dir().join(format!("pv-pos-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let root = PluginRoot(dir.clone());
+        // 先写一个插件自有键,验证位置键追加不覆盖
+        kv_write(&root.data_dir("token-monitor").join("kv.json"), "ball.provider", json!("glm")).unwrap();
+        persist_window_position(&root, "token-monitor", 1234, -567).unwrap();
+        let path = root.data_dir("token-monitor").join("kv.json");
+        assert_eq!(kv_read(&path, "window:x").unwrap(), Some(json!(1234)));
+        assert_eq!(kv_read(&path, "window:y").unwrap(), Some(json!(-567)));
+        assert_eq!(kv_read(&path, "ball.provider").unwrap(), Some(json!("glm")));
+        // 二次落盘覆盖旧值
+        persist_window_position(&root, "token-monitor", 200, 300).unwrap();
+        assert_eq!(kv_read(&path, "window:x").unwrap(), Some(json!(200)));
+        // 非法 id 拒绝
+        assert!(persist_window_position(&root, "Bad_Id", 1, 1).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

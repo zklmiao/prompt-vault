@@ -97,7 +97,7 @@ fn write_config(cfg: &AppConfig) -> Result<(), String> {
     fs::write(&path, json).map_err(|e| e.to_string())
 }
 
-fn show_main_window(app: &AppHandle) {
+pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_LABEL) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -597,6 +597,7 @@ pub fn run() {
             win_close,
             credentials::plugin_credential_set,
             credentials::plugin_credential_delete,
+            credentials::plugin_credential_configured,
             net::plugin_net_fetch,
             plugins::plugin_fetch_source,
             plugins::plugin_install,
@@ -609,6 +610,8 @@ pub fn run() {
             plugins::plugin_installed_manifest,
             plugins::plugin_open_window,
             plugins::plugin_close_window,
+            plugins::plugin_resize_window,
+            plugins::plugin_show_main_panel,
             i18n::i18n_locales,
             i18n::i18n_locale_file
         ])
@@ -709,6 +712,18 @@ pub fn run() {
             // 快速拾取窗口失焦即隐藏
             WindowEvent::Focused(false) if window.label() == QUICKPICK_LABEL => {
                 let _ = window.hide();
+            }
+            // 插件窗口拖动:防抖 300ms 后由 Rust 把最终位置独占写入该插件
+            // kv.json 的 window:x/y(位置持久化,插件 JS 不感知;§5.1)
+            WindowEvent::Moved(_)
+                if window
+                    .label()
+                    .starts_with(crate::plugins::PLUGIN_WINDOW_PREFIX) =>
+            {
+                crate::plugins::schedule_plugin_position_save(
+                    window.app_handle().clone(),
+                    window.label().to_string(),
+                );
             }
             _ => {}
         })

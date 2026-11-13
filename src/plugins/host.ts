@@ -208,7 +208,7 @@ export async function injectOne(pluginId: string): Promise<void> {
     if (syncErrors.length === 0) syncErrors.push(ev.message);
   };
   window.addEventListener("error", onError);
-  window.__pvSlot = createBridge(pluginId);
+  window.__pvSlot = createBridge(pluginId, manifest);
   let script: HTMLScriptElement | null = null;
   try {
     script = document.createElement("script");

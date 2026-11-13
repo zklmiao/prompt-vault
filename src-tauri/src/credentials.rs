@@ -85,6 +85,30 @@ pub fn plugin_credential_delete(scope: String) -> Result<(), String> {
     credential_delete_with(&SystemKeyring, &scope)
 }
 
+/// scope 凭据是否已配置(设置面板/插件面板展示「已配置」用):
+/// 环境变量优先(命名与空串语义复用 net.rs 的 credential_env_configured),
+/// env 未配置再查 keyring 条目 —— get 后只判存在与非空,**秘密值绝不返回**。
+#[tauri::command]
+pub fn plugin_credential_configured(scope: String) -> Result<bool, String> {
+    credential_configured_with(&SystemKeyring, &scope, &crate::net::real_env)
+}
+
+/// 命令体抽成 store + getenv 参数形式,单测可注入内存 mock 与假环境
+pub(crate) fn credential_configured_with(
+    store: &dyn KeyringBackend,
+    scope: &str,
+    getenv: &dyn Fn(&str) -> Option<String>,
+) -> Result<bool, String> {
+    validate_scope(scope)?;
+    if crate::net::credential_env_configured_with(scope, getenv) {
+        return Ok(true);
+    }
+    Ok(store
+        .get(scope)?
+        .map(|s| !s.is_empty())
+        .unwrap_or(false))
+}
+
 /// 命令体抽成 store 参数形式,单测可注入内存 mock
 pub(crate) fn credential_set_with(
     store: &dyn KeyringBackend,
@@ -146,8 +170,19 @@ impl KeyringBackend for MemKeyring {
 #[cfg(test)]
 mod tests {
     use super::{
-        MemKeyring, credential_delete_with, credential_set_with, scope_valid, KeyringBackend,
+        MemKeyring, credential_configured_with, credential_delete_with, credential_set_with,
+        scope_valid, KeyringBackend,
     };
+
+    /// 假环境:与 net.rs 测试的 env_map 同构(键值精确匹配,未列出的键返回 None)
+    fn env_map<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
 
     /// scope 正则 `^[a-z0-9-]{1,32}$` 的等价边界
     #[test]
@@ -214,5 +249,68 @@ mod tests {
         assert!(credential_delete_with(&store, "Bad_Scope").is_err());
         credential_delete_with(&store, "glm").unwrap();
         assert_eq!(store.get("glm").unwrap(), None);
+    }
+
+    /* ---- plugin_credential_configured:env 优先,keyring 只判存在 ---- */
+
+    /// env 命中:即使 keyring 为空也视为已配置
+    #[test]
+    fn configured_env_hit() {
+        let store = MemKeyring::new();
+        let env = env_map(&[("PROMPT_VAULT_GLM_KEY", "test-glm-key")]);
+        assert_eq!(credential_configured_with(&store, "glm", &env).unwrap(), true);
+        // 空串 env 语义与 load_credential 一致:视为未设置 → 落到 keyring(无)→ false
+        let empty_env = env_map(&[("PROMPT_VAULT_GLM_KEY", "")]);
+        assert_eq!(
+            credential_configured_with(&store, "glm", &empty_env).unwrap(),
+            false
+        );
+    }
+
+    /// 仅 keyring:env 未配置但条目存在(含空串条目视为未配置)
+    #[test]
+    fn configured_keyring_only() {
+        let store = MemKeyring::new();
+        let no_env = env_map(&[]);
+        assert_eq!(credential_configured_with(&store, "glm", &no_env).unwrap(), false);
+        store.set("glm", "test-glm-key").unwrap();
+        assert_eq!(credential_configured_with(&store, "glm", &no_env).unwrap(), true);
+        store.set("opencode", "").unwrap();
+        assert_eq!(
+            credential_configured_with(&store, "opencode", &no_env).unwrap(),
+            false,
+            "空串条目应视为未配置(与 load_credential 空串语义一致)"
+        );
+    }
+
+    /// 两者皆无:false
+    #[test]
+    fn configured_neither() {
+        let store = MemKeyring::new();
+        assert_eq!(credential_configured_with(&store, "opencode", &env_map(&[])).unwrap(), false);
+    }
+
+    /// volcengine:AK+SK 双值都非空才算配置;半配(env 只有 AK)落到 keyring 判定
+    #[test]
+    fn configured_volcengine_requires_both_ak_sk() {
+        let store = MemKeyring::new();
+        let half = env_map(&[("PROMPT_VAULT_VOLCENGINE_AK", "test-ak-1234")]);
+        assert_eq!(credential_configured_with(&store, "volcengine", &half).unwrap(), false);
+        let both = env_map(&[
+            ("PROMPT_VAULT_VOLCENGINE_AK", "test-ak-1234"),
+            ("PROMPT_VAULT_VOLCENGINE_SK", "test-sk-5678"),
+        ]);
+        assert_eq!(credential_configured_with(&store, "volcengine", &both).unwrap(), true);
+        // 半配 env + keyring 有条目 → keyring 兜底为已配置
+        store.set("volcengine", "test-ak-1234\ntest-sk-5678").unwrap();
+        assert_eq!(credential_configured_with(&store, "volcengine", &half).unwrap(), true);
+    }
+
+    /// 非法 scope 报错(与 set/delete 同一校验)
+    #[test]
+    fn configured_rejects_invalid_scope() {
+        let store = MemKeyring::new();
+        assert!(credential_configured_with(&store, "GLM", &env_map(&[])).is_err());
+        assert!(credential_configured_with(&store, "", &env_map(&[])).is_err());
     }
 }

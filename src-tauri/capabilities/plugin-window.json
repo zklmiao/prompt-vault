@@ -4,6 +4,7 @@
   "description": "Capabilities for plugin windows (pv-plugin-*)",
   "windows": ["pv-plugin-*"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging"
   ]
 }
