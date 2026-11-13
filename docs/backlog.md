@@ -1,8 +1,8 @@
 # Prompt Vault 待办与路线图
 
-> 最后更新:2026-11-13(P3 插件系统进行中;追加 A9/A10)。
+> 最后更新:2026-11-14(P3 插件系统五批次完成;A9/A10 待做)。
 > 维护约定:所有未完成的计划都写在这里,不要只留在聊天记录里;完成后把 `[ ]` 改为 `[x]`,并注明提交号或版本。
-> 状态基线:v0.1.0 已发布(GitHub Release 双资产),此后新增功能均已提交:拖拽导入与批量操作(`66cf56a`)、使用统计与可配置热键(`5957037`)、自绘标题栏(`29dea01`)、QuickPick 2.0(`430fbd5`)、命令面板与速查表(`62a6a51`);当前版本 **0.1.9.2-alpha**(清单 `0.1.9-alpha.2`;v0.1.9-alpha 已发布,v0.1.9.2-alpha 附首轮全量回归报告,README 下载表已同步)。
+> 状态基线:v0.1.0 已发布(GitHub Release 双资产),此后新增功能均已提交:拖拽导入与批量操作(`66cf56a`)、使用统计与可配置热键(`5957037`)、自绘标题栏(`29dea01`)、QuickPick 2.0(`430fbd5`)、命令面板与速查表(`62a6a51`);当前版本 **0.2.0-alpha**(2026-11-14 已升,v0.1.9-alpha 与 v0.1.9.2-alpha 已发布、后者附首轮全量回归报告;0.2.0-alpha 的 GitHub Release 待手动发布)。
 
 ---
 
@@ -96,11 +96,11 @@
 
 ### v1 实施批次
 
-- [ ] **批次 1 · 宿主与管线**:plugins.json 与存储布局 / manifest 解析 / 权限模型与安装确认弹窗 / script 注入热加载 + webview reload 卸载 / 插件区 UI(已安装·源管理·市场)/ 四平台源协议(github/gitee/gitlab/gitea)/ 下载→sha256→zip-slip 防护解压安装管线;Rust 新增 zip·sha2·hmac·ureq·keyring·notify 依赖与新命令
-- [ ] **批次 2 · i18n**:核心 t() 运行时 + 全量抽 key(20 个组件)/ zh-CN 内置 fallback / en 语言包(type:i18n 数据插件)+ `locales\` 手动目录 / 跟随系统 locale + 设置覆盖 / 即时切换不 reload
-- [ ] **批次 3 · Token 圆球**:Rust 网络代理(SSRF 防护 + raw/bearer/volcengine HMAC 三认证模式)/ 凭据管理器流(Key 明文不出 Rust)/ 圆球悬浮窗(84px、单家显示、左键轮换切换、位置记忆)+ 主窗口详情面板(5h/周/24h 聚合/MCP 月度)/ GLM → 火山方舟 → OpenCode 逐家接入
-- [ ] **批次 4 · MCP Server**:`--mcp` headless(stdio JSON-RPC,跳过 GUI/单实例)/ tools(search_prompts·get_prompt·list_tags·save_prompt 只增)+ 原生 prompts({{变量}}→MCP 参数)/ 数据文件命名全局互斥 + notify watcher(编辑态跳过刷新)/ 产品面板(默认关、风险明示、四客户端一键配置)
-- [ ] **批次 5 · 收尾**:`npx tsc --noEmit` + `cargo test` + `npm run tauri build` + 刷 releases 冒烟 / README(功能表、隐私章节改「核心离线,插件按需联网」、快捷键)+ AGENTS.md 定位段同步改写(单 JSON·不联网 → 增 plugins.json·插件按需联网)/ 本 backlog 与设计文档勾选回写
+- [x] **批次 1 · 宿主与管线**:plugins.json 与存储布局 / manifest 解析 / 权限模型与安装确认弹窗 / script 注入热加载 + webview reload 卸载 / 插件区 UI(已安装·源管理·市场)/ 四平台源协议(github/gitee/gitlab/gitea)/ 下载→sha256→zip-slip 防护解压安装管线;Rust 新增 zip·sha2·hmac·ureq·keyring·notify 依赖与新命令(关键提交:Rust 侧 `b91e8f0`、前端宿主 `bd087b3`、注入 pv-1 `ede2d34`、gitea http/IPv6 源 `fd24177`)
+- [x] **批次 2 · i18n**:核心 t() 运行时 + 全量抽 key(20 个组件)/ zh-CN 内置 fallback / en 语言包(type:i18n 数据插件)+ `locales\` 手动目录 / 跟随系统 locale + 设置覆盖 / 即时切换不 reload(关键提交:locales 目录 `f0fe653`、运行时与消费 `e0c87ac`、全量抽 key `f4efd46`)
+- [x] **批次 3 · Token 圆球**:Rust 网络代理(SSRF 防护 + raw/bearer/volcengine HMAC 三认证模式)/ 凭据管理器流(Key 明文不出 Rust)/ 圆球悬浮窗(84px、单家显示、左键轮换切换、位置记忆)+ 主窗口详情面板(5h/周/24h 聚合/MCP 月度)/ GLM → 火山方舟 → OpenCode 逐家接入(关键提交:`84bf5d2`…`3c80fee`,Rust 侧合并 `05bc28f`)
+- [x] **批次 4 · MCP Server**:`--mcp` headless(stdio JSON-RPC,跳过 GUI/单实例)/ tools(search_prompts·get_prompt·list_tags·save_prompt 只增)+ 原生 prompts({{变量}}→MCP 参数)/ 数据文件命名互斥 + notify watcher(编辑态跳过刷新)/ 产品面板(默认关、风险明示、四客户端一键配置)(关键提交:headless `599ed67`、互斥 `3e45dcc`、watcher `a190f46`、面板 `3e43250`、跨窗口校验 P0 `42d7c8b`)
+- [x] **批次 5 · 收尾**:`npx tsc --noEmit` + `cargo test` + `npm run tauri build` + 刷 releases 冒烟 / README(功能表、隐私章节改「核心离线,插件按需联网」、快捷键)+ AGENTS.md 定位段同步改写(单 JSON·不联网 → 增 plugins.json·插件按需联网)/ 本 backlog 与设计文档勾选回写(关键提交:zip 解压限额加固 `efe5a58`、版本升 0.2.0-alpha `f51b106`、文档同步本批 docs 提交)
 
 ### v2(已定,不承诺时间)
 

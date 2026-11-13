@@ -75,7 +75,7 @@ token-monitor/
   "id": "token-monitor",          // 唯一,kebab-case,安装目录名
   "name": "Coding 套餐用量监控",
   "version": "1.0.0",             // semver
-  "minAppVersion": "0.2.0",       // 低于则拒绝安装/提示升级应用
+  "minAppVersion": "0.2.0-alpha", // 低于则拒绝安装/提示升级应用
   "type": "standard",             // standard | i18n
   "ui": "window",                 // panel | window | none —— 插件自声明形态
   "permissions": [
@@ -130,7 +130,7 @@ pv.events.on(name, cb) / pv.events.emit(name, payload); // 宿主事件总线(�
 | gitlab | `https://gitlab.com/{owner}/{repo}/-/raw/{ref}/pv-plugins.json` |
 | gitea | `https://{host}/{owner}/{repo}/raw/{ref}/pv-plugins.json`(自建域名,过 SSRF 校验) |
 
-provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定平台类型)。
+provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定平台类型)。gitea 自建源允许跟随用户主页地址的 http scheme 与 `[IPv6]:port` 方括号主机形式(SSRF 校验不变)。
 
 ### 3.2 仓库清单 pv-plugins.json
 
@@ -145,7 +145,7 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
       "release": { "version": "1.0.0", "url": "https://github.com/…/token-monitor-1.0.0.zip", "sha256": "…" },
       "beta":    { "version": "1.1.0-beta.2", "url": "…", "sha256": "…" }
     },
-    "minAppVersion": "0.2.0",
+    "minAppVersion": "0.2.0-alpha",
     "permissions": ["net:open.bigmodel.cn", "credential:glm", "window:float"]
   }]
 }
@@ -171,6 +171,7 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
 | `plugin_net_fetch(pluginId, url, opts)` | 网络代理:校验 pluginId 对应 manifest 的 `net:` 白名单 + SSRF;`authFrom` 时由 Rust 取凭据注入认证头;详见 §5.3 |
 | `plugin_credential_set(scope, secret)` / `plugin_credential_delete(scope)` | 凭据管理器写入/删除(设置面板直调;**读取只发生在请求拼装时,不暴露给 JS**) |
 
+> **zip 解压限额**(防 zip 炸弹:下载体积上限只约束压缩包,deflate 千倍膨胀可写满磁盘):单条目解压上限 8MB、累计解压上限 64MB、条目数上限 512,全部流式边解压边计,任一超限立即拒绝并由调用方清理半成品目录。
 重装/更新 = 新版本目录解压成功后原子切换 `store\<id>\current` 指向;旧版本目录保留一个作为回滚点,再次更新时清理上一个回滚点。
 
 ---
@@ -300,7 +301,7 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
   - `GET {base}/api/monitor/usage/quota/limit` → `data.level`、`limits[]`:`TOKENS_LIMIT`(新套餐两条,按 `nextResetTime` 升序,**[0]=5h、[1]=周**;`percentage` 0-100)、`TIME_LIMIT`(实为 **MCP 月度**:`currentValue`/`usage`/`remaining`;注意命名易混淆);`nextResetTime` 为毫秒时间戳。
   - `GET {base}/api/monitor/usage/model-usage?startTime=..&endTime=..`(时间 `yyyy-MM-dd HH:mm:ss` URL 编码)→ `data.x_time[]`/`data.tokensUsage[]` 小时桶,聚合出 24h。
   - 依据:官方 Claude Code 插件源码 zai-org/zai-coding-plugins `query-usage.mjs`(逐字核实)。
-- **火山方舟**:`https://ark.cn-beijing.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01`(火山 AK/SK V4 HMAC-SHA256 签名,**不支持 Bearer**)→ 5h/日/周/月四窗口 Quota/Used/ResetTime,百分比自算;`GetUsageDetails` 按模型明细。官方公开文档。
+- **火山方舟**:`https://ark.cn-beijing.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01`(火山 AK/SK V4 HMAC-SHA256 签名,**不支持 Bearer**)→ 5h/日/周/月四窗口 Quota/Used/ResetTime,百分比自算;`GetUsageDetails` 按模型明细。官方公开文档。国际端点 `ark.ap-southeast.bytepluses.com`、region `ap-southeast` 按 BytePlus 公开约定补齐,**灰区未实测**,国际版取数失败时优先核对此处。
 - **OpenCode**:`GET https://opencode.ai/zen/go/v1/usage`,认证 `Authorization: Bearer sk-opencode-...` → `usage.{rolling,weekly,monthly}.{status:"ok"|"rate-limited", percent, resetsAt(ISO)}`;403+`EntitlementError`=无 Go 订阅。依据:上游 anomalyco/opencode `packages/core/src/usage-limits.ts`(逐字核实)。
 
 **v2 四家**:
