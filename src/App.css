@@ -407,6 +407,25 @@ textarea.mono {
   overflow-y: auto;
 }
 
+.list-foot {
+  flex-shrink: 0;
+  padding: 6px 14px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.list-foot .kbd {
+  font-size: 10px;
+  padding: 0 5px;
+  min-width: 16px;
+  line-height: 1.4;
+}
+
 .row {
   position: relative;
   padding: 10px 40px 10px 40px;

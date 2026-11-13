@@ -146,6 +146,9 @@ export default function Sidebar({
           </div>
         )}
       </div>
+      <div className="list-foot">
+        <kbd className="kbd">Ctrl+K</kbd> 命令面板 · <kbd className="kbd">?</kbd> 速查表
+      </div>
     </aside>
   );
 }
