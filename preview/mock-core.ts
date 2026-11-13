@@ -451,6 +451,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     case "open_editor":
       console.log("[mock] open_editor", args?.id);
       return null;
+    case "app_exe_path":
+      return "C:\\mock\\prompt-vault.exe";
     /* ---- 插件系统命令 ---- */
     case "plugin_read_state":
       return JSON.stringify(mockPlugins, null, 2);
