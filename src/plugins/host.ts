@@ -11,6 +11,7 @@ import {
   hasRegistered,
   pluginCommands,
   resetRegistry,
+  waitForRegistered,
 } from "./registry";
 import { coerceCatalog, isValidLangCode, type Catalog } from "../i18n/core";
 import {
@@ -95,15 +96,6 @@ export async function savePluginsState(state: PluginsState): Promise<void> {
 }
 
 /* ---------- 注入引擎(pv-1:IIFE 参数闭包 + 一次性注入槽位) ---------- */
-
-async function waitForRegistration(pluginId: string): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < REGISTER_TIMEOUT_MS) {
-    if (hasRegistered(pluginId)) return true;
-    await new Promise((r) => window.setTimeout(r, 100));
-  }
-  return hasRegistered(pluginId);
-}
 
 /**
  * 消费语言包插件(type:"i18n",纯数据不注入脚本;修复批次1「字典永远无法生效」):
@@ -217,11 +209,15 @@ export async function injectOne(pluginId: string): Promise<void> {
   };
   window.addEventListener("error", onError);
   window.__pvSlot = createBridge(pluginId);
+  let script: HTMLScriptElement | null = null;
   try {
-    const script = document.createElement("script");
+    script = document.createElement("script");
     script.textContent = `;(function(pv){\n"use strict";\n${source}\n})(window.__pvSlot);`;
     document.head.appendChild(script); // 同步执行:返回后槽位即持本插件桥
   } finally {
+    // 已执行完毕的内联 <script> 不留 document.head(pv-1 一次性槽位的收尾;
+    // appendChild 抛错时节点未挂载,remove() 对游离节点是无害 no-op)
+    script?.remove();
     delete window.__pvSlot;
     window.removeEventListener("error", onError);
   }
@@ -229,7 +225,8 @@ export async function injectOne(pluginId: string): Promise<void> {
     throw new Error(translate("host.errScript", { msg: syncErrors[0] }));
   }
   if (!hasRegistered(pluginId)) {
-    const ok = await waitForRegistration(pluginId);
+    // 信号化等待:markRegistered 即时唤醒,超时兜底(旧 100ms 轮询已删)
+    const ok = await waitForRegistered(pluginId, REGISTER_TIMEOUT_MS);
     if (!ok) {
       throw new Error(translate("host.errTimeout"));
     }
