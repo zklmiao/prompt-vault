@@ -98,12 +98,16 @@ token-monitor/
 // main.js 可用 API 面(pv-1,版本化)
 pv.panel.register({ id, title, render(el) {} });        // ui:"panel" → 主窗口插件区页签
 pv.window.setup({ size, onMount(el) {} });              // ui:"window" → 宿主为其开专属 WebviewWindow
+pv.window.hide() / openPanel() / resize(w, h);          // 隐藏窗口 / 唤出主窗详情面板 / 临时扩窗(球窗菜单)
+pv.credentials.set/delete(scope, secret) / configured(); // 凭据通道(manifest 快照判权)
 pv.commands.register({ id, label, keywords, run });     // 自动进 Ctrl+K 命令面板
 pv.i18n.register({ en: { ... } });                      // 声明插件自带翻译
 pv.net.fetch(url, { authFrom, mode, method, body, headers });  // 一律走 Rust 代理
 pv.storage.get(key) / pv.storage.set(key, value);       // 沙箱 KV:plugins\data\<id>\kv.json
 pv.events.on(name, cb) / pv.events.emit(name, payload); // 宿主事件总线(插件间解耦通信)
 ```
+
+凭据与窗口等敏感通道在桥闭包内按**安装时 manifest.permissions 快照**同步判权(fail-closed:未声明即 reject 可读中文错误;manifest 读取失败视为空权限集),网络越权仍由 Rust 侧 `net:` 白名单拒绝。
 
 ### 2.4 生命周期与失败隔离
 
@@ -176,10 +180,22 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
 ### 5.1 圆球悬浮窗
 
 - 窗口:label `pv-plugin-token-monitor`,约 **84px**、无边框、透明、always-on-top、shadow=false、resizable=false、skip_taskbar;
-- 常驻:可拖动(`data-tauri-drag-region`)、**位置与显示状态记忆**(存 `pv.storage`)、点关闭 = 隐藏(右键菜单/主窗口可唤出)、**随应用启动自动显示**(仅当插件启用);
+- 常驻:可拖动(`data-tauri-drag-region`)、**位置与显示状态记忆**、点关闭 = 隐藏(右键菜单/主窗口可唤出)、**随应用启动自动显示**(仅当插件启用);
 - 视觉:**环形进度 = 当前供应商 5h 窗口百分比**,中心 = 供应商缩写(GLM / ARK / OC)+ 百分比数字;配色仅用 CSS token:环底 `--border`、进度 `--accent`、≥80% 转 `--danger`,文字 `--text`;
 - 交互:**左键点击 = 轮换下一家已配置供应商**(手动切换);右键菜单 = 直选某家 / 立即刷新 / 打开详情面板 / 隐藏;悬停 tooltip = 5h / 周 / 距重置倒计时;
 - 刷新:跟随全局设置(默认手动;可选自动轮询,默认关,间隔 ≥2 分钟,参照社区 statusline 实践 120s 缓存)。
+
+**存储键契约**(kv = `plugins\data\<id>\kv.json`,双实例共享,last-wins):
+`window:visible`(bool,插件隐藏前写 false,宿主启动读,缺省视为 true)、
+`window:x` / `window:y`(int 物理像素,**仅 Rust 拖动防抖独占写**,插件 JS 不感知不读写)、
+`ball.provider`(当前供应商)、`ball.poll` = `{enabled, intervalSec}`(钳制 ≥120s,默认关)、
+`cache:<provider>`(最近一次成功数据 + fetchedAt,失败不覆盖)。
+
+**双实例语义**:main.js 在主窗(面板实例)与球窗(球实例)各注入一次,registry 每窗口独立,事件总线不跨窗口;`cache:<provider>`(kv)是两实例唯一共享数据面(球实例写、面板实例读)。
+
+**位置持久化(Rust 独占)**:`on_window_event` 的 `WindowEvent::Moved`(限 `pv-plugin-*` 窗口)防抖 300ms 后,由 Rust 直接把最终 `outer_position` 写入该插件 kv.json 的 `window:x/y`(复用沙箱 KV 内部读写,不经 IPC);启动/安装后开窗时宿主读 kv 传给 `plugin_open_window` 可选 x/y 参数(先 set_position 后 show 防闪跳),无记忆沿用主窗内偏移缺省定位。
+
+**自动显示矩阵**:启动 = `window:visible !== false` 才弹;安装/启用成功 = 总是自动弹(即插即用);球窗菜单「隐藏」= 落盘 `window:visible=false` 后隐藏,重启不弹。
 
 ### 5.2 主窗口详情面板
 
