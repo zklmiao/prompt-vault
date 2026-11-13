@@ -14,6 +14,13 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod data_lock;
 mod fuzzy;
+mod mcp;
+
+/// `--mcp` headless 入口:stdio JSON-RPC MCP Server。
+/// 不走 tauri Builder,不建窗口/托盘/单实例,由 CLI 客户端按需拉起。
+pub fn run_mcp() {
+    mcp::run();
+}
 
 /// 首次启动时建议的数据文件位置(按共识默认指向工程内 data 目录)
 const DEFAULT_DATA_PATH: &str = r"E:\Agent\Proj\prompt-vault\data\prompts.json";
@@ -58,7 +65,7 @@ struct AppConfig {
     hotkeys: Option<HotkeyConfig>,
 }
 
-fn config_file_path() -> PathBuf {
+pub(crate) fn config_file_path() -> PathBuf {
     let base = std::env::var("APPDATA")
         .map(PathBuf::from)
         .or_else(|_| {
@@ -69,7 +76,7 @@ fn config_file_path() -> PathBuf {
     base.join("prompt-vault").join("config.json")
 }
 
-fn read_config() -> AppConfig {
+pub(crate) fn read_config() -> AppConfig {
     fs::read_to_string(config_file_path())
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -353,7 +360,7 @@ fn iso_from_epoch_secs(secs: u64) -> String {
     format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}.000Z")
 }
 
-fn now_iso_utc() -> String {
+pub(crate) fn now_iso_utc() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
