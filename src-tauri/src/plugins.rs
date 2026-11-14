@@ -2296,6 +2296,29 @@ mod tests {
         assert!(!path.exists(), "被拒绝的写入不应产生文件");
     }
 
+    /// kv key 无字符集限制(仅非空 + ≤128 字节):多账号 cache 键含中文 label
+    /// (`cache:<provider>:<label>`)必须可存可读(开工卡 §A.5)
+    #[test]
+    fn kv_key_accepts_multibyte_labels() {
+        let dir = std::env::temp_dir().join(format!("pv-kv-utf8-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("kv.json");
+        let key = "cache:glm:主号";
+        assert!(key.len() <= 128, "中文 label 的 cache 键应在上限内");
+        kv_write(&path, key, json!({"fiveHour": {"percent": 12.5}})).unwrap();
+        assert_eq!(
+            kv_read(&path, key).unwrap(),
+            Some(json!({"fiveHour": {"percent": 12.5}}))
+        );
+        // 账号清单键同样可存(数组值)
+        kv_write(&path, "tm.accounts", json!([{"provider": "glm", "label": "主号"}])).unwrap();
+        assert_eq!(
+            kv_read(&path, "tm.accounts").unwrap(),
+            Some(json!([{"provider": "glm", "label": "主号"}]))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Moved 位置落盘(Moved 防抖事件链本身人工验):persist_window_position
     /// 应把物理像素坐标写进该插件 kv.json 的 window:x / window:y,且不破坏既有键
     #[test]

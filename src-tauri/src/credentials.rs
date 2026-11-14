@@ -10,8 +10,13 @@
 use keyring::Entry;
 
 const KEYRING_SERVICE: &str = "prompt-vault";
-const SCOPE_MAX_LEN: usize = 32;
+const PROVIDER_MAX_LEN: usize = 32;
+const LABEL_MAX_CHARS: usize = 16;
 const SECRET_MAX_LEN: usize = 4096;
+
+/// 默认账号的 label:无 label(`<provider>`,旧单账号形态)≡ label 为
+/// "default" 的账号(迁移后形态)。两者的 env 映射与删除连带按 default 语义特判。
+pub(crate) const DEFAULT_LABEL: &str = "default";
 
 /// 凭据存储抽象:真实实现走 Windows 凭据管理器,单测用内存 mock,不真写系统凭据
 pub(crate) trait KeyringBackend: Send + Sync {
@@ -56,20 +61,53 @@ impl KeyringBackend for SystemKeyring {
     }
 }
 
-/// scope 校验:等价于正则 `^[a-z0-9-]{1,32}$`,手写字符判定避免引入 regex 依赖
-pub(crate) fn scope_valid(scope: &str) -> bool {
-    !scope.is_empty()
-        && scope.len() <= SCOPE_MAX_LEN
-        && scope
+/// provider 段校验:等价正则 `^[a-z0-9-]{1,32}$`,手写字符判定避免引入 regex 依赖
+pub(crate) fn provider_valid(provider: &str) -> bool {
+    !provider.is_empty()
+        && provider.len() <= PROVIDER_MAX_LEN
+        && provider
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// label 段校验:等价正则 `[A-Za-z0-9_-\u4e00-\u9fa5]{1,16}`(按字符数计,
+/// 中文一个字算一位)。禁冒号/斜杠/空白 —— 冒号会造出多段 scope 使前缀权限
+/// 门控与 cache 键解析歧义,斜杠与空白防路径/展示层逃逸。
+fn label_valid(label: &str) -> bool {
+    let count = label.chars().count();
+    count >= 1
+        && count <= LABEL_MAX_CHARS
+        && label.chars().all(|c| {
+            c.is_ascii_alphanumeric() || c == '_' || c == '-' || ('\u{4e00}'..='\u{9fa5}').contains(&c)
+        })
+}
+
+/// scope 语法:`<provider>[:<label>]`(单冒号;无 label ≡ 该 provider 的
+/// default 账号)。等价于 provider 段与 label 段分别校验;`glm:a:b` 因 label
+/// 段含冒号天然被拒。
+pub(crate) fn scope_valid(scope: &str) -> bool {
+    match scope.split_once(':') {
+        None => provider_valid(scope),
+        Some((provider, label)) => provider_valid(provider) && label_valid(label),
+    }
+}
+
+/// scope 解析 → (provider, Option<label>);非法 scope 返回 None
+pub(crate) fn scope_parts(scope: &str) -> Option<(&str, Option<&str>)> {
+    if !scope_valid(scope) {
+        return None;
+    }
+    Some(match scope.split_once(':') {
+        None => (scope, None),
+        Some((provider, label)) => (provider, Some(label)),
+    })
 }
 
 fn validate_scope(scope: &str) -> Result<(), String> {
     if scope_valid(scope) {
         Ok(())
     } else {
-        Err("scope 只能包含小写字母、数字和连字符(1-32 位)".to_string())
+        Err("scope 需为 <provider> 或 <provider>:<label>(provider:小写字母/数字/连字符 1-32 位;label:字母/数字/下划线/连字符/中文 1-16 位,禁冒号斜杠空白)".to_string())
     }
 }
 
@@ -128,20 +166,47 @@ pub async fn plugin_credential_configured(
     .map_err(|e| format!("后台任务执行失败:{e}"))?
 }
 
-/// 命令体抽成 store + getenv 参数形式,单测可注入内存 mock 与假环境
+/// 命令体抽成 store + getenv 参数形式,单测可注入内存 mock 与假环境。
+/// 解析链(顺序即优先级,label 由 scope 语法给出):
+///   - 无 label(旧单账号形态,行为不变):env → keyring `<provider>`;
+///   - label "default"(迁移后默认账号):keyring `<provider>:default` → env →
+///     keyring `<provider>`(legacy 回落 —— 迁移不搬运旧条目,靠回落读到旧 Key);
+///   - 其余 label:keyring `<provider>:<label>` → keyring `<provider>`(legacy 回落)。
+/// env 固定映射 provider 的 default 账号(命名见 net.rs),不外溢到其他 label。
 pub(crate) fn credential_configured_with(
     store: &dyn KeyringBackend,
     scope: &str,
     getenv: &dyn Fn(&str) -> Option<String>,
 ) -> Result<bool, String> {
-    validate_scope(scope)?;
-    if crate::net::credential_env_configured_with(scope, getenv) {
-        return Ok(true);
+    let Some((provider, label)) = scope_parts(scope) else {
+        return Err("凭据 scope 不合法".to_string());
+    };
+    let has_entry = |name: &str| -> Result<bool, String> {
+        Ok(store.get(name)?.map(|s| !s.is_empty()).unwrap_or(false))
+    };
+    match label {
+        None => {
+            if crate::net::credential_env_configured_with(provider, getenv) {
+                return Ok(true);
+            }
+            has_entry(scope)
+        }
+        Some(DEFAULT_LABEL) => {
+            if has_entry(scope)? {
+                return Ok(true);
+            }
+            if crate::net::credential_env_configured_with(provider, getenv) {
+                return Ok(true);
+            }
+            has_entry(provider)
+        }
+        Some(_) => {
+            if has_entry(scope)? {
+                return Ok(true);
+            }
+            has_entry(provider)
+        }
     }
-    Ok(store
-        .get(scope)?
-        .map(|s| !s.is_empty())
-        .unwrap_or(false))
 }
 
 /// 命令体抽成 store 参数形式,单测可注入内存 mock
@@ -160,12 +225,23 @@ pub(crate) fn credential_set_with(
     store.set(scope, secret)
 }
 
+/// 凭据删除的 default 连带:label "default" 的账号删除时连 legacy 旧条目
+/// (`<provider>`)一起删 —— 迁移不搬运旧条目,旧条目是该账号的凭据遗产,
+/// 不连带删会经回落串号到之后新建的任意 `<provider>:<label>` 账号;
+/// 其余 label 只删自身;无 label 即旧条目本身,只删自身。删除幂等(条目
+/// 不存在也成功),因此 `glm:default` 无自名条目(纯迁移形态)时同样会清掉旧条目。
 pub(crate) fn credential_delete_with(
     store: &dyn KeyringBackend,
     scope: &str,
 ) -> Result<(), String> {
-    validate_scope(scope)?;
-    store.delete(scope)
+    let Some((provider, label)) = scope_parts(scope) else {
+        return Err("凭据 scope 不合法".to_string());
+    };
+    store.delete(scope)?;
+    if label == Some(DEFAULT_LABEL) {
+        store.delete(provider)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -206,7 +282,7 @@ impl KeyringBackend for MemKeyring {
 mod tests {
     use super::{
         MemKeyring, credential_configured_with, credential_delete_with, credential_set_with,
-        scope_valid, KeyringBackend,
+        scope_parts, scope_valid, KeyringBackend,
     };
 
     /// 假环境:与 net.rs 测试的 env_map 同构(键值精确匹配,未列出的键返回 None)
@@ -219,7 +295,8 @@ mod tests {
         }
     }
 
-    /// scope 正则 `^[a-z0-9-]{1,32}$` 的等价边界
+    /// scope 正则的等价边界:provider 段 `^[a-z0-9-]{1,32}$` +
+    /// label 段 `[A-Za-z0-9_-\u4e00-\u9fa5]{1,16}`(单冒号,无 label ≡ default 账号)
     #[test]
     fn scope_validation_matches_regex_bounds() {
         for ok in ["glm", "opencode", "volcengine", "a", "a-b2", &"k".repeat(32)] {
@@ -238,6 +315,47 @@ mod tests {
         ] {
             assert!(!scope_valid(bad), "「{bad}」不应通过 scope 校验");
         }
+    }
+
+    /// 带label scope 的边界:合法形态 / 含冒号 label 拒(多段 scope)/ 空与超长
+    /// label 拒 / 中文与 16 字 label 过 / provider 段非法拒
+    #[test]
+    fn labeled_scope_validation_bounds() {
+        for ok in [
+            "glm:main",
+            "glm:default",
+            "volcengine:主号",
+            "opencode:work-1",
+            "glm:A_b-3",
+            "glm:一二三四五六七八九十一二三四五六", // 16 字中文 label(48 字节)
+        ] {
+            assert!(scope_valid(ok), "「{ok}」应通过 scope 校验");
+        }
+        for bad in [
+            "glm:",           // 空 label
+            ":main",          // 空 provider
+            "glm:a:b",        // label 含冒号(多段 scope)
+            "glm:a/b",        // 斜杠禁入 label
+            "glm:a b",        // 空白禁入 label
+            "glm:a\tb",
+            "glm:MAIN:2",     // 多段
+            "GLM:main",       // provider 大写
+            "glm:字字字字字字字字字字字字字字字字字", // 17 字超长
+            "glm:main ",      // 尾随空白
+        ] {
+            assert!(!scope_valid(bad), "「{bad}」不应通过 scope 校验");
+        }
+    }
+
+    /// scope_parts 解析:provider 段与 label 段拆分正确,非法 scope 返回 None
+    #[test]
+    fn scope_parts_splits_provider_and_label() {
+        assert_eq!(scope_parts("glm"), Some(("glm", None)));
+        assert_eq!(scope_parts("glm:main"), Some(("glm", Some("main"))));
+        assert_eq!(scope_parts("volcengine:主号"), Some(("volcengine", Some("主号"))));
+        assert_eq!(scope_parts(""), None);
+        assert_eq!(scope_parts("glm:a:b"), None);
+        assert_eq!(scope_parts("GLM"), None);
     }
 
     /// 凭据 trait 的内存 mock:写 → 读 → 覆盖写 → 删 → 读为空
@@ -347,5 +465,145 @@ mod tests {
         let store = MemKeyring::new();
         assert!(credential_configured_with(&store, "GLM", &env_map(&[])).is_err());
         assert!(credential_configured_with(&store, "", &env_map(&[])).is_err());
+        assert!(credential_configured_with(&store, "glm:a:b", &env_map(&[])).is_err());
+    }
+
+    /* ---- 多账号:legacy 回落与 default 连带 ---- */
+
+    /// labeled scope 回落三态之一(新名命中):`glm:main` 自名条目存在时直接命中,
+    /// 且自录 Key 不被 default 账号的 env 遮蔽
+    #[test]
+    fn configured_labeled_scope_own_entry_wins_over_env() {
+        let store = MemKeyring::new();
+        let env = env_map(&[("PROMPT_VAULT_GLM_KEY", "test-glm-key")]);
+        store.set("glm:main", "test-glm-key-2").unwrap();
+        assert_eq!(
+            credential_configured_with(&store, "glm:main", &env).unwrap(),
+            true,
+            "自名条目命中,env 不遮蔽"
+        );
+        // 删掉自名条目后(无回落可用):其他 label 不读 env → 未配置
+        store.delete("glm:main").unwrap();
+        assert_eq!(
+            credential_configured_with(&store, "glm:main", &env).unwrap(),
+            false,
+            "非 default 的 label 账号不读 env(env 固定映射 default 账号)"
+        );
+    }
+
+    /// labeled scope 回落三态之二(default 的 env 命中):`glm:default` 无自名
+    /// 条目、env 命中 → 已配置(env 固定映射 default 账号的迁移形态)
+    #[test]
+    fn configured_default_label_reads_provider_env() {
+        let store = MemKeyring::new();
+        let env = env_map(&[("PROMPT_VAULT_GLM_KEY", "test-glm-key")]);
+        assert_eq!(
+            credential_configured_with(&store, "glm:default", &env).unwrap(),
+            true
+        );
+        // 其他 label 不继承 default 的 env
+        assert_eq!(
+            credential_configured_with(&store, "glm:work", &env).unwrap(),
+            false
+        );
+    }
+
+    /// labeled scope 回落三态之三(回落旧名):`glm:default` 与 `glm:main` 在
+    /// env 与自名条目均未命中时回落旧 `<provider>` 条目(迁移不搬运旧条目的关键)
+    #[test]
+    fn configured_labeled_scope_falls_back_to_legacy_entry() {
+        let store = MemKeyring::new();
+        let no_env = env_map(&[]);
+        store.set("glm", "test-glm-key").unwrap();
+        assert_eq!(
+            credential_configured_with(&store, "glm:default", &no_env).unwrap(),
+            true,
+            "default 账号回落旧条目"
+        );
+        assert_eq!(
+            credential_configured_with(&store, "glm:main", &no_env).unwrap(),
+            true,
+            "任意 label 回落旧条目(开工卡 §1.2 provider:任意label)"
+        );
+        // 空串旧条目视为未配置 → 回落失败
+        let empty = MemKeyring::new();
+        empty.set("glm", "").unwrap();
+        assert_eq!(
+            credential_configured_with(&empty, "glm:default", &no_env).unwrap(),
+            false
+        );
+    }
+
+    /// volcengine 的 labeled 账号:AK/SK 双值语义随 provider 段生效;
+    /// 自名条目优先,回落旧条目,default 账号读完整成对的 env
+    #[test]
+    fn configured_labeled_volcengine_ak_sk() {
+        let store = MemKeyring::new();
+        let no_env = env_map(&[]);
+        // 回落旧条目("AK\nSK" 两行编码)
+        store.set("volcengine", "test-ak-1234\ntest-sk-5678").unwrap();
+        assert_eq!(
+            credential_configured_with(&store, "volcengine:main", &no_env).unwrap(),
+            true
+        );
+        // 自名条目优先
+        store.set("volcengine:main", "test-ak-9999\ntest-sk-8888").unwrap();
+        assert_eq!(
+            credential_configured_with(&store, "volcengine:main", &no_env).unwrap(),
+            true
+        );
+        // default 账号:自名条目未建时 env 完整成对命中
+        let both = env_map(&[
+            ("PROMPT_VAULT_VOLCENGINE_AK", "test-ak-1234"),
+            ("PROMPT_VAULT_VOLCENGINE_SK", "test-sk-5678"),
+        ]);
+        assert_eq!(
+            credential_configured_with(&store, "volcengine:default", &both).unwrap(),
+            true
+        );
+        // 非 default label 不读 env
+        let only = MemKeyring::new();
+        assert_eq!(
+            credential_configured_with(&only, "volcengine:main", &both).unwrap(),
+            false
+        );
+    }
+
+    /// default 账号删除连带旧条目:`glm:default` 删除同时清 `glm:default` 与
+    /// 旧 `glm`;其余 label 只删自身;无 label 即旧条目本身
+    #[test]
+    fn delete_default_label_cascades_legacy_entry() {
+        let store = MemKeyring::new();
+        store.set("glm", "test-glm-key").unwrap();
+        store.set("glm:default", "test-glm-key-2").unwrap();
+        store.set("glm:work", "test-glm-key-3").unwrap();
+        credential_delete_with(&store, "glm:work").unwrap();
+        assert_eq!(store.get("glm:work").unwrap(), None);
+        assert_eq!(store.get("glm").unwrap().as_deref(), Some("test-glm-key"), "非 default label 删除不连带");
+        credential_delete_with(&store, "glm:default").unwrap();
+        assert_eq!(store.get("glm:default").unwrap(), None);
+        assert_eq!(store.get("glm").unwrap(), None, "default 删除连旧条目一起删");
+        // 纯迁移形态(自名条目不存在)同样清掉旧条目
+        store.set("volcengine", "test-ak-1234\ntest-sk-5678").unwrap();
+        credential_delete_with(&store, "volcengine:default").unwrap();
+        assert_eq!(store.get("volcengine").unwrap(), None);
+        // 无 label:只删自身(即旧条目本身)
+        store.set("opencode", "test-oc-key").unwrap();
+        credential_delete_with(&store, "opencode").unwrap();
+        assert_eq!(store.get("opencode").unwrap(), None);
+    }
+
+    /// 非法 labeled scope 的写入/删除拒绝,不落任何条目
+    #[test]
+    fn command_set_delete_rejects_invalid_labeled_scope() {
+        let store = MemKeyring::new();
+        assert!(credential_set_with(&store, "glm:", "test-glm-key").is_err());
+        assert!(credential_set_with(&store, "glm:a:b", "test-glm-key").is_err());
+        assert!(credential_set_with(&store, "glm:a/b", "test-glm-key").is_err());
+        assert!(credential_delete_with(&store, "glm:", ).is_err());
+        assert_eq!(store.get("glm:").unwrap(), None, "被拒绝的写入不落盘");
+        // 合法中文 label 可写入
+        credential_set_with(&store, "glm:主号", "test-glm-key").unwrap();
+        assert_eq!(store.get("glm:主号").unwrap().as_deref(), Some("test-glm-key"));
     }
 }

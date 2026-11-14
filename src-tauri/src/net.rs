@@ -18,7 +18,7 @@ use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use url::{Host, Url};
 
-use crate::credentials::{KeyringBackend, SystemKeyring, scope_valid};
+use crate::credentials::{KeyringBackend, SystemKeyring, provider_valid};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -108,11 +108,16 @@ fn host_allowed(permissions: &[String], host: &str) -> bool {
         .any(|h| h.trim().to_lowercase() == host)
 }
 
-/// `credential:<scope>` 权限声明检查
+/// `credential:<scope>` 权限声明检查。多账号 scope 语法(`<provider>[:<label>]`)
+/// 下按 provider 前缀门控:声明 `credential:<provider>` 覆盖该 provider 的全部
+/// label 账号(`<provider>:<label>`),跨 provider 借道(glm:x 写 volcengine
+/// 账号)一律拒绝。空 provider 段不参与匹配(防 `credential:` 空声明逃逸)。
 fn credential_allowed(permissions: &[String], scope: &str) -> bool {
-    permissions
-        .iter()
-        .any(|p| p.trim() == format!("credential:{scope}"))
+    let provider = scope.split(':').next().unwrap_or("");
+    !provider.is_empty()
+        && permissions
+            .iter()
+            .any(|p| p.trim() == format!("credential:{provider}"))
 }
 
 // ---------- SSRF 防护 ----------
@@ -372,63 +377,138 @@ fn volcengine_sign(
 // ---------- 凭据解析 ----------
 
 /// 凭据解析结果:单值 Key(GLM/OpenCode)或火山 AK/SK 双值
+#[derive(Debug)]
 enum AuthSecret {
     Single(String),
     AkSk(String, String),
 }
 
-/// scope → 单值 Key 的环境变量名:`PROMPT_VAULT_<SCOPE 大写、- 转 _>_KEY`
-fn single_key_env_name(scope: &str) -> String {
-    format!("PROMPT_VAULT_{}_KEY", scope.to_uppercase().replace('-', "_"))
+/// provider → 单值 Key 的环境变量名:`PROMPT_VAULT_<PROVIDER 大写、- 转 _>_KEY`。
+/// env 固定映射 provider 的 default 账号(无 label 的 `<provider>` 旧单账号形态,
+/// 或 label "default" 的迁移形态);label 账号不产生 per-account 环境变量,
+/// label "default" 之外的账号也不读取该 env(见 load_credential 的解析链)。
+fn single_key_env_name(provider: &str) -> String {
+    format!("PROMPT_VAULT_{}_KEY", provider.to_uppercase().replace('-', "_"))
 }
 
-/// 凭据只从环境变量或凭据管理器读取,环境变量优先;空串凭据一律视为未设置
+/// 凭据只从环境变量或凭据管理器读取;空串凭据一律视为未设置
 /// (统一在本函数过滤,不依赖调用方);getenv 注入以便单测隔离真实环境。
+///
+/// 解析链(顺序即优先级;与 credentials.rs 的 credential_configured_with 逐条对应):
+///   - 无 label(旧单账号形态,行为不变):env → keyring `<provider>`;
+///   - label "default"(迁移默认账号):keyring `<provider>:default`(自录 Key
+///     优先,不被 env 遮蔽)→ env → keyring `<provider>`(legacy 回落);
+///   - 其余 label:keyring `<provider>:<label>` → keyring `<provider>`(legacy 回落)。
+/// 环境变量在 check_env 半配(火山 AK/SK 只设了一个)时:无 label 视为配置错误
+/// 直接报错(既有行为);label "default" 视为 env 不可用,继续回落旧条目。
 fn load_credential(
     store: &dyn KeyringBackend,
     scope: &str,
     getenv: &dyn Fn(&str) -> Option<String>,
 ) -> Result<AuthSecret, String> {
-    if !scope_valid(scope) {
+    let Some((provider, label)) = crate::credentials::scope_parts(scope) else {
         return Err("凭据 scope 不合法".to_string());
-    }
+    };
     let not_empty = |s: &String| !s.is_empty();
-    if scope == "volcengine" {
+    if provider == "volcengine" {
         // 命名例外:火山 AK/SK 双值环境变量
-        let ak = getenv("PROMPT_VAULT_VOLCENGINE_AK").filter(not_empty);
-        let sk = getenv("PROMPT_VAULT_VOLCENGINE_SK").filter(not_empty);
-        return match (ak, sk) {
-            (Some(ak), Some(sk)) => Ok(AuthSecret::AkSk(ak, sk)),
+        let read_ak_sk = |ak: Option<String>, sk: Option<String>| match (ak, sk) {
+            (Some(ak), Some(sk)) => Ok(Some(AuthSecret::AkSk(ak, sk))),
             (Some(_), None) | (None, Some(_)) => Err(
                 "环境变量 PROMPT_VAULT_VOLCENGINE_AK 与 PROMPT_VAULT_VOLCENGINE_SK 需同时设置"
                     .to_string(),
             ),
-            (None, None) => match store.get("volcengine")?.filter(not_empty) {
+            (None, None) => Ok(None),
+        };
+        let from_keyring = |name: &str| -> Result<Option<AuthSecret>, String> {
+            match store.get(name)?.filter(not_empty) {
                 // 凭据管理器条目约定:secret 为 "AK\nSK" 两行编码(写入侧见 credentials.rs)
                 Some(secret) => {
                     let mut parts = secret.splitn(2, '\n');
                     match (parts.next(), parts.next()) {
                         (Some(ak), Some(sk)) if !ak.is_empty() && !sk.is_empty() => {
-                            Ok(AuthSecret::AkSk(ak.to_string(), sk.to_string()))
+                            Ok(Some(AuthSecret::AkSk(ak.to_string(), sk.to_string())))
                         }
                         _ => Err("volcengine 凭据格式不正确:应为 AK/SK 双值(以换行分隔)".to_string()),
                     }
                 }
+                None => Ok(None),
+            }
+        };
+        if label.is_none() {
+            if let Some(secret) = read_ak_sk(
+                getenv("PROMPT_VAULT_VOLCENGINE_AK").filter(not_empty),
+                getenv("PROMPT_VAULT_VOLCENGINE_SK").filter(not_empty),
+            )? {
+                return Ok(secret);
+            }
+            return match from_keyring(scope)? {
+                Some(secret) => Ok(secret),
                 None => Err(
                     "未找到 volcengine 凭据:请先在设置中录入 AK/SK,或设置环境变量".to_string(),
                 ),
-            },
+            };
+        }
+        // labeled:自名条目 → [default: env 完整成对才用,半配继续回落] → legacy 旧条目
+        if let Some(secret) = from_keyring(scope)? {
+            return Ok(secret);
+        }
+        if label == Some(crate::credentials::DEFAULT_LABEL) {
+            let env_pair = read_ak_sk(
+                getenv("PROMPT_VAULT_VOLCENGINE_AK").filter(not_empty),
+                getenv("PROMPT_VAULT_VOLCENGINE_SK").filter(not_empty),
+            );
+            // 半配(Err)不阻断:default 账号的 env 是次选,回落旧条目优先保可用
+            if let Ok(Some(secret)) = env_pair {
+                return Ok(secret);
+            }
+        }
+        return match from_keyring(provider)? {
+            Some(secret) => Ok(secret),
+            None => Err(format!(
+                "未找到 {scope} 凭据:请先在设置中录入该账号的 AK/SK"
+            )),
         };
     }
-    let env_name = single_key_env_name(scope);
-    if let Some(key) = getenv(&env_name).filter(not_empty) {
-        return Ok(AuthSecret::Single(key));
-    }
-    match store.get(scope)?.filter(not_empty) {
-        Some(secret) => Ok(AuthSecret::Single(secret)),
-        None => Err(format!(
-            "未找到 {scope} 凭据:请先在设置中录入,或设置环境变量 {env_name}"
-        )),
+    let env_name = single_key_env_name(provider);
+    let from_keyring = |name: &str| -> Result<Option<AuthSecret>, String> {
+        Ok(store.get(name)?.filter(not_empty).map(AuthSecret::Single))
+    };
+    match label {
+        None => {
+            if let Some(key) = getenv(&env_name).filter(not_empty) {
+                return Ok(AuthSecret::Single(key));
+            }
+            match from_keyring(scope)? {
+                Some(secret) => Ok(secret),
+                None => Err(format!(
+                    "未找到 {scope} 凭据:请先在设置中录入,或设置环境变量 {env_name}"
+                )),
+            }
+        }
+        Some(crate::credentials::DEFAULT_LABEL) => {
+            if let Some(secret) = from_keyring(scope)? {
+                return Ok(secret);
+            }
+            if let Some(key) = getenv(&env_name).filter(not_empty) {
+                return Ok(AuthSecret::Single(key));
+            }
+            match from_keyring(provider)? {
+                Some(secret) => Ok(secret),
+                None => Err(format!(
+                    "未找到 {scope} 凭据:请先在设置中录入,或设置环境变量 {env_name}"
+                )),
+            }
+        }
+        Some(_) => match from_keyring(scope)? {
+            Some(secret) => Ok(secret),
+            None => match from_keyring(provider)? {
+                Some(secret) => Ok(secret),
+                None => Err(format!(
+                    "未找到 {scope} 凭据:请先在设置中录入该账号的 Key"
+                )),
+            },
+        },
     }
 }
 
@@ -437,21 +517,23 @@ pub(crate) fn real_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
-/// scope 的凭据环境变量是否已配置:单值 Key 非空;volcengine 为 AK/SK 双值,
+/// provider 的凭据环境变量是否已配置:单值 Key 非空;volcengine 为 AK/SK 双值,
 /// 两者都非空才算配置。命名与空串语义与 load_credential 完全一致(getenv 注入便于单测)。
+/// 参数是 provider 段(scope 的 `<provider>` 部分):env 固定映射 provider 的
+/// default 账号,不含 label 维度。
 pub(crate) fn credential_env_configured_with(
-    scope: &str,
+    provider: &str,
     getenv: &dyn Fn(&str) -> Option<String>,
 ) -> bool {
-    if !scope_valid(scope) {
+    if !provider_valid(provider) {
         return false;
     }
     let not_empty = |v: &Option<String>| v.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
-    if scope == "volcengine" {
+    if provider == "volcengine" {
         return not_empty(&getenv("PROMPT_VAULT_VOLCENGINE_AK"))
             && not_empty(&getenv("PROMPT_VAULT_VOLCENGINE_SK"));
     }
-    not_empty(&getenv(&single_key_env_name(scope)))
+    not_empty(&getenv(&single_key_env_name(provider)))
 }
 
 // ---------- 共享 Agent(连接复用) ----------
@@ -751,6 +833,25 @@ mod tests {
         assert!(!credential_allowed(&perms, "anything-else"));
     }
 
+    /// 多账号前缀门控:声明 `credential:glm` 覆盖 `glm:<任意label>`;
+    /// 跨 provider 借道(glm 权限写 volcengine 账号)拒绝;空 provider 段不匹配
+    #[test]
+    fn credential_permission_gate_covers_labeled_accounts_by_provider() {
+        let perms = extract_permissions(PLUGINS_JSON, "token-monitor").unwrap();
+        // 同 provider 的 label 账号被声明覆盖
+        assert!(credential_allowed(&perms, "glm:main"));
+        assert!(credential_allowed(&perms, "glm:主号"));
+        assert!(credential_allowed(&perms, "glm:default"));
+        // 跨 provider 借道拒绝
+        assert!(!credential_allowed(&perms, "volcengine:main"), "glm 声明不覆盖 volcengine 账号");
+        assert!(!credential_allowed(&perms, "opencode:x"));
+        // 空 provider 段与多段 scope 不放行(多段会在 load_credential 被语法校验拒绝)
+        assert!(!credential_allowed(&perms, ""));
+        assert!(!credential_allowed(&perms, ":main"));
+        // 非法 provider 段(大写)不匹配小写声明
+        assert!(!credential_allowed(&perms, "GLM:main"));
+    }
+
     /// 契约样例(与 plugins.rs 写端、mcp/mod.rs 读端共用同一份 JSON):
     /// 安装器写入的 permissions 快照必须被本模块读端原样识别
     #[test]
@@ -840,6 +941,99 @@ mod tests {
         let no_env = env_map(&[]);
         assert!(load_credential(&store, "GLM", &no_env).is_err());
         assert!(load_credential(&store, "", &no_env).is_err());
+        assert!(load_credential(&store, "glm:a:b", &no_env).is_err());
+        assert!(load_credential(&store, "glm:", &no_env).is_err());
+    }
+
+    /* ---- 多账号:labeled scope 的解析链(env 固定映射 default / legacy 回落) ---- */
+
+    /// labeled 单值 Key 三态:新名命中(env 不遮蔽自录 Key)→ 回落旧名 → 均无报错;
+    /// env 仅 default 账号可见(非 default label 不读 env)
+    #[test]
+    fn load_credential_labeled_single_key_chain() {
+        let store = MemKeyring::new();
+        let env = env_map(&[("PROMPT_VAULT_GLM_KEY", "test-glm-key")]);
+        let no_env = env_map(&[]);
+        // ① 新名命中:自录 Key 优先,不被 default 的 env 遮蔽
+        store.set("glm:main", "test-glm-main").unwrap();
+        match load_credential(&store, "glm:main", &env).unwrap() {
+            AuthSecret::Single(k) => assert_eq!(k, "test-glm-main"),
+            _ => panic!("glm:main 应解析为单值 Key"),
+        }
+        // ② 非 default label 不读 env,回落旧名
+        store.delete("glm:main").unwrap();
+        store.set("glm", "test-glm-legacy").unwrap();
+        match load_credential(&store, "glm:main", &env).unwrap() {
+            AuthSecret::Single(k) => assert_eq!(k, "test-glm-legacy", "回落旧条目而非 env"),
+            _ => panic!("glm:main 应解析为单值 Key"),
+        }
+        // ③ default 账号:自名条目 → env → 回落旧名
+        match load_credential(&store, "glm:default", &no_env).unwrap() {
+            AuthSecret::Single(k) => assert_eq!(k, "test-glm-legacy"),
+            _ => panic!("glm:default 应回落旧条目"),
+        }
+        let env_only = MemKeyring::new();
+        match load_credential(&env_only, "glm:default", &env).unwrap() {
+            AuthSecret::Single(k) => assert_eq!(k, "test-glm-key", "default 账号读 provider env"),
+            _ => panic!("glm:default 应解析为单值 Key"),
+        }
+        // 非 default label 不读 env、无旧条目 → 报错(错误信息不含 env 建议)
+        let err = load_credential(&env_only, "glm:main", &env).unwrap_err();
+        assert!(err.contains("glm:main"), "错误信息应含 scope:{err}");
+        assert!(!err.contains("PROMPT_VAULT_GLM_KEY"), "非 default 账号不应建议 env:{err}");
+    }
+
+    /// labeled volcengine:AK/SK 双值语义随 provider 段生效(自名条目 → env(default,
+    /// 完整成对)→ legacy 旧条目);半配 env 在 labeled 链路不阻断回落
+    #[test]
+    fn load_credential_labeled_volcengine_chain() {
+        let no_env = env_map(&[]);
+        // 回落旧条目("AK\nSK" 两行编码)
+        let store = MemKeyring::new();
+        store.set("volcengine", "test-ak-1234\ntest-sk-5678").unwrap();
+        match load_credential(&store, "volcengine:main", &no_env).unwrap() {
+            AuthSecret::AkSk(ak, sk) => {
+                assert_eq!(ak, "test-ak-1234");
+                assert_eq!(sk, "test-sk-5678");
+            }
+            _ => panic!("volcengine:main 应解析为 AK/SK 双值"),
+        }
+        // 自名条目优先于旧条目
+        store.set("volcengine:main", "test-ak-9999\ntest-sk-8888").unwrap();
+        match load_credential(&store, "volcengine:main", &no_env).unwrap() {
+            AuthSecret::AkSk(ak, sk) => {
+                assert_eq!(ak, "test-ak-9999");
+                assert_eq!(sk, "test-sk-8888");
+            }
+            _ => panic!("volcengine:main 应解析为 AK/SK 双值"),
+        }
+        // default 账号:env 完整成对命中(自名条目未建)
+        let fresh = MemKeyring::new();
+        let both = env_map(&[
+            ("PROMPT_VAULT_VOLCENGINE_AK", "test-ak-1234"),
+            ("PROMPT_VAULT_VOLCENGINE_SK", "test-sk-5678"),
+        ]);
+        match load_credential(&fresh, "volcengine:default", &both).unwrap() {
+            AuthSecret::AkSk(ak, sk) => {
+                assert_eq!(ak, "test-ak-1234");
+                assert_eq!(sk, "test-sk-5678");
+            }
+            _ => panic!("volcengine:default 应解析为 AK/SK 双值"),
+        }
+        // 非 default label 不读 env
+        assert!(load_credential(&fresh, "volcengine:main", &both).is_err());
+        // 半配 env 不阻断 default 账号的 legacy 回落(与无 label 的硬报错区分)
+        let half = MemKeyring::new();
+        half.set("volcengine", "test-ak-1234\ntest-sk-5678").unwrap();
+        let half_env = env_map(&[("PROMPT_VAULT_VOLCENGINE_AK", "test-ak-1234")]);
+        match load_credential(&half, "volcengine:default", &half_env).unwrap() {
+            AuthSecret::AkSk(ak, _) => assert_eq!(ak, "test-ak-1234", "半配 env 应回落旧条目"),
+            _ => panic!("volcengine:default 应回落旧条目"),
+        }
+        // 自名条目格式损坏(AK 单行)→ 报错,不静默回落
+        let broken = MemKeyring::new();
+        broken.set("volcengine:main", "only-ak-line").unwrap();
+        assert!(load_credential(&broken, "volcengine:main", &no_env).is_err());
     }
 
     // ---------- 火山签名规范化 ----------
