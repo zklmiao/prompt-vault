@@ -373,6 +373,7 @@ export const zhCN = {
   "ph.toastStateSaveFailed": "插件状态保存失败:{msg}",
   "ph.toastInstalled": "已安装 {name} {version}",
   "ph.toastInstalledDisabled": "已安装 {name} {version}(保持停用)",
+  "ph.toastUpdatedRestart": "已更新到 {version},重启应用后球体界面生效",
   "ph.toastInstallFailed": "安装失败:{msg}",
   "ph.toastUninstalled": "已卸载插件",
   "ph.toastUninstallFailed": "卸载失败:{msg}",

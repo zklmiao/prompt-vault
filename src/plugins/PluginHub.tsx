@@ -42,6 +42,9 @@ import type {
 type Section = "installed" | "sources" | "market" | `panel:${string}`;
 type Channel = "release" | "beta";
 
+/** 更新完成后延迟 reload:让结果 toast 完整可读(宿主 toast 2200ms 自动消失) */
+const UPDATE_RELOAD_DELAY_MS = 1500;
+
 /** 仓库主页地址解析:github/gitee/gitlab 按域名自动识别,其余按 gitea 处理(可手动纠正) */
 export function parseRepoHome(url: string): {
   provider: ProviderKind;
@@ -275,6 +278,8 @@ export default function PluginHub({
     async (marketEntry: MarketEntry, channel: Channel) => {
       const ref: ChannelRef | null = marketEntry[channel];
       if (!ref) return;
+      // 更新判定:安装前 installed 里已存在该 id 即为更新(而非首装)
+      const isUpdate = !!state?.installed[marketEntry.id];
       setBusy(true);
       try {
         await installPlugin({
@@ -290,7 +295,20 @@ export default function PluginHub({
           await injectAfterEnable(marketEntry.id, hooks);
           // 注入失败时错误会写回 plugins.json,重读以反映错误态
           await reloadState();
-          showToast(t("ph.toastInstalled", { name: marketEntry.name, version: ref.version }));
+          if (isUpdate) {
+            // 更新场景:主窗注入代码是安装时快照,延迟 reload 换新(先让 toast 读完整);
+            // 球窗(ui:"window")是独立常驻 webview,主窗 reload 热换不到,只能重启生效
+            // —— toast 改提示重启(Rust 侧已开窗只会 show+focus,不重复开窗)
+            const mf = await pluginInstalledManifest(marketEntry.id).catch(() => null);
+            if (mf?.ui === "window") {
+              showToast(t("ph.toastUpdatedRestart", { version: ref.version }));
+            } else {
+              showToast(t("ph.toastInstalled", { name: marketEntry.name, version: ref.version }));
+            }
+            window.setTimeout(() => window.location.reload(), UPDATE_RELOAD_DELAY_MS);
+          } else {
+            showToast(t("ph.toastInstalled", { name: marketEntry.name, version: ref.version }));
+          }
         } else {
           showToast(
             t("ph.toastInstalledDisabled", { name: marketEntry.name, version: ref.version }),
@@ -305,7 +323,7 @@ export default function PluginHub({
         setBusy(false);
       }
     },
-    [hooks, reloadState, showToast, t],
+    [hooks, reloadState, showToast, state, t],
   );
 
   const doUninstall = useCallback(

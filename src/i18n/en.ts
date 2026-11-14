@@ -372,6 +372,7 @@ export const en: Partial<Record<ZhKey, string>> = {
   "ph.toastStateSaveFailed": "Failed to save plugin state: {msg}",
   "ph.toastInstalled": "Installed {name} {version}",
   "ph.toastInstalledDisabled": "Installed {name} {version} (kept disabled)",
+  "ph.toastUpdatedRestart": "Updated to {version}. Restart the app to apply the ball UI",
   "ph.toastInstallFailed": "Install failed: {msg}",
   "ph.toastUninstalled": "Plugin uninstalled",
   "ph.toastUninstallFailed": "Uninstall failed: {msg}",
