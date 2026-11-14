@@ -221,7 +221,9 @@ const MOCK_MANIFESTS: Record<string, Record<string, unknown>> = {
       "net:ark.ap-southeast.bytepluses.com",
       "net:opencode.ai",
       "credential:glm",
+      "credential:glm-intl",
       "credential:volcengine",
+      "credential:volcengine-intl",
       "credential:opencode",
       "window:float",
     ],
@@ -395,7 +397,9 @@ const MOCK_MARKET: {
         "net:ark.ap-southeast.bytepluses.com",
         "net:opencode.ai",
         "credential:glm",
+        "credential:glm-intl",
         "credential:volcengine",
+        "credential:volcengine-intl",
         "credential:opencode",
         "window:float",
       ],
@@ -571,8 +575,10 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     case "plugin_credential_set": {
       const scope = String(args?.scope ?? "");
       const secret = String(args?.secret ?? "");
-      if (!/^[a-z0-9-]{1,32}$/.test(scope)) {
-        throw new Error("scope 只能包含小写字母、数字和连字符(1-32 位)");
+      if (!mockCredScopeValid(scope)) {
+        throw new Error(
+          "scope 需为 <provider> 或 <provider>:<label>(provider:小写字母/数字/连字符 1-32 位;label:字母/数字/下划线/连字符/中文 1-16 位,禁冒号斜杠空白)",
+        );
       }
       if (secret === "") throw new Error("凭据内容不能为空");
       const creds = loadMockCreds();
@@ -583,18 +589,28 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
     }
     case "plugin_credential_delete": {
       const scope = String(args?.scope ?? "");
-      if (!/^[a-z0-9-]{1,32}$/.test(scope)) {
-        throw new Error("scope 只能包含小写字母、数字和连字符(1-32 位)");
+      if (!mockCredScopeValid(scope)) {
+        throw new Error(
+          "scope 需为 <provider> 或 <provider>:<label>(provider:小写字母/数字/连字符 1-32 位;label:字母/数字/下划线/连字符/中文 1-16 位,禁冒号斜杠空白)",
+        );
       }
       const creds = loadMockCreds();
       delete creds[scope];
+      // 多账号语义与 Rust 对齐:default 账号删除连 legacy 旧条目一起删
+      if (scope.endsWith(":default")) {
+        delete creds[scope.slice(0, scope.indexOf(":"))];
+      }
       saveMockCreds(creds);
       console.log("[mock] plugin_credential_delete", scope);
       return null;
     }
     case "plugin_credential_configured": {
       const scope = String(args?.scope ?? "");
-      return scope in loadMockCreds();
+      const creds = loadMockCreds();
+      if (scope in creds) return true;
+      // legacy 回落(与 Rust 对齐):labeled scope 未命中自名条目时回落旧 <provider>
+      const idx = scope.indexOf(":");
+      return idx > 0 ? scope.slice(0, idx) in creds : false;
     }
     case "plugin_net_fetch": {
       const pluginId = String(args?.pluginId ?? "");
@@ -622,11 +638,19 @@ export async function invoke(cmd: string, args?: Record<string, unknown>) {
         if (!opts.authFrom.startsWith("credential:")) {
           throw new Error("authFrom 仅支持 credential:<scope> 形式");
         }
+        // 多账号 scope 的 provider 前缀门控(与 Rust credential_allowed 同规则):
+        // 声明 credential:<provider> 覆盖该 provider 全部 label 账号
         const scope = opts.authFrom.slice("credential:".length);
-        if (!permissions.includes(`credential:${scope}`)) {
+        const provider = scope.split(":")[0] ?? "";
+        if (provider === "" || !permissions.includes(`credential:${provider}`)) {
           throw new Error("插件未声明该凭据权限");
         }
-        if (!(scope in loadMockCreds())) {
+        // 凭据存在性走 configured 同一回落语义(legacy 旧条目兜底)
+        const creds = loadMockCreds();
+        const idx = scope.indexOf(":");
+        const exists =
+          scope in creds || (idx > 0 ? scope.slice(0, idx) in creds : false);
+        if (!exists) {
           throw new Error(`未找到 ${scope} 凭据:请先在设置中录入(预览无环境变量通道)`);
         }
       }
@@ -680,6 +704,14 @@ function saveMockCreds(creds: Record<string, string>): void {
   } catch {
     /* ignore */
   }
+}
+
+/** 多账号 scope 校验(与 Rust scope_valid 对齐):
+ *  `<provider>[:<label>]` —— provider ^[a-z0-9-]{1,32}$,
+ *  label [A-Za-z0-9_-\u4e00-\u9fa5]{1,16}(禁冒号/斜杠/空白) */
+function mockCredScopeValid(scope: string): boolean {
+  const m = /^([a-z0-9-]{1,32})(:([A-Za-z0-9_-\u4e00-\u9fa5]{1,16}))?$/.exec(scope);
+  return m !== null;
 }
 
 /** 三家罐头响应:按 URL 形状分发,字段形状逐条对应设计文档附录 A(2026-11 核实) */

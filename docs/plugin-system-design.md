@@ -200,7 +200,9 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
 
 ### 5.2 主窗口详情面板
 
-每个已配置供应商一张卡:5h 窗口(百分比 + 倒计时)、周限额(百分比 + 倒计时)、24h 聚合 token 数、(GLM)MCP 月度用量;**积分指标不做**(仅体验卡有积分且 API 无字段,做了必是假数据)。设置区:各供应商 Key 录入(写凭据管理器)、自动轮询开关。
+每个已配置账号一张卡:5h 窗口(百分比 + 倒计时)、周限额(百分比 + 倒计时)、24h 聚合 token 数、(GLM 系含国际)MCP 月度用量;卡标题 = 供应商名 + 账号 label,副标题 = 端点 host;「全部刷新」并行刷全部账号(共享 Rust ureq Agent)。**积分指标不做**(仅体验卡有积分且 API 无字段,做了必是假数据)。设置区:添加账号(供应商下拉含国内/国际变体 + 标签 + Key 录入,写凭据管理器)、账号列表([供应商+端点徽标 | label | 已配置徽标 | 删除],删除同时清该账号缓存)、自动轮询开关。
+
+**多账号模型**:账号 = `{provider, label}`,账号 id/凭据 scope = `<provider>:<label>`;provider 为端点变体(`glm` / `glm-intl` / `volcengine` / `volcengine-intl` / `opencode`),国际端点是账号属性(替代旧「国际版开关」)。账号清单存 kv `tm.accounts`(清单单写者 = 面板实例;球实例只读,空清单时以 configured 探测的 default 账号作内存 fallback 视图);缓存键 `cache:<provider>:<label>`,label "default" 读取回落旧 `cache:<provider>`(旧单账号缓存兼容);错误与失败上报按账号粒度,失败不覆盖该账号缓存。悬浮球轮换序列 = 全部已配置账号(kv 清单序),右键菜单按供应商分组列账号(显示 label),`ball.provider` 存 `<provider>:<label>`(旧裸 provider 值读取时升级 `<provider>:default`)。首启动迁移:清单为空 → 探测各 provider legacy 配置态 → 命中者自动建 `{provider, label:"default"}` 入清单(幂等,仅命中才落盘)。
 
 ### 5.3 认证与数据(v1 三家;端点事实见附录 A)
 
@@ -210,9 +212,11 @@ provider 由主页 URL 特征自动识别(gitea 需在添加源时手动指定�
 | 火山方舟 | `prompt-vault:volcengine`(AK、SK 两值) | `volcengine`(HMAC-SHA256 V4 签名在 Rust 完成) | GetAFPUsage 四窗口,百分比自算 |
 | OpenCode | `prompt-vault:opencode` | `bearer` | zen/go/v1/usage 直接给 percent |
 
-环境变量 `PROMPT_VAULT_GLM_KEY` / `PROMPT_VAULT_VOLCENGINE_AK`+`_SK` / `PROMPT_VAULT_OPENCODE_KEY` 优先于凭据管理器。**Key 明文只在 Rust 内流转**:JS 调 `pv.net.fetch(url, { authFrom: "credential:glm", mode: "raw" })`,Rust 取凭据、拼头、发请求、只回响应体。
+环境变量 `PROMPT_VAULT_GLM_KEY` / `PROMPT_VAULT_VOLCENGINE_AK`+`_SK` / `PROMPT_VAULT_OPENCODE_KEY` 优先于凭据管理器。**Key 明文只在 Rust 内流转**:JS 调 `pv.net.fetch(url, { authFrom: "credential:<provider>:<label>", mode: "raw" })`,Rust 取凭据、拼头、发请求、只回响应体。
 
-**scope 映射规则**:manifest/`authFrom` 的 `credential:<scope>` ↔ 凭据管理器条目 `prompt-vault:<scope>` ↔ 环境变量 `PROMPT_VAULT_<SCOPE>_KEY`;火山方舟因 AK/SK 双值为**命名例外**:`prompt-vault:volcengine` 条目存双值,环境变量为 `PROMPT_VAULT_VOLCENGINE_AK` + `PROMPT_VAULT_VOLCENGINE_SK`。
+**scope 映射规则**:manifest/`authFrom` 的 `credential:<scope>` ↔ 凭据管理器条目 `prompt-vault:<scope>` ↔ 环境变量 `PROMPT_VAULT_<PROVIDER>_KEY`;火山方舟因 AK/SK 双值为**命名例外**:`prompt-vault:<provider>:<label>` 条目存双值,环境变量为 `PROMPT_VAULT_VOLCENGINE_AK` + `PROMPT_VAULT_VOLCENGINE_SK`。
+
+**多账号 scope 语法**:`<provider>[:<label>]`(单冒号)。provider 维持 `^[a-z0-9-]{1,32}$`;label 字符集 `[A-Za-z0-9_-\u4e00-\u9fa5]{1,16}`(禁冒号/斜杠/空白,防前缀门控逃逸与 cache 键解析歧义);无 label ≡ 该 provider 的 default 账号(旧单账号形态)。keyring 条目 user = scope 原样,不做入口规范化。凭据权限按 **provider 前缀门控**:声明 `credential:<provider>` 覆盖该 provider 的全部 label 账号,跨 provider 借道一律拒绝(Rust `credential_allowed` 与桥面 requirePermission 同规则)。解析链(env 固定映射 provider 的 default 账号):无 label 为 env → keyring(既有行为不变);label "default" 为 keyring 自名条目 → env → keyring `<provider>`(**legacy 回落** —— 迁移不搬运旧条目,靠回落读到旧 Key);其余 label 为 keyring 自名条目 → keyring `<provider>`。删除 default 账号连 legacy 旧条目一起删(其余 label 只删自身);旧 cache/selection(`ball.provider` 裸 provider 值)读取时升级兼容。
 
 ---
 
