@@ -2,6 +2,20 @@
   "name": "Prompt Vault 官方插件源",
   "plugins": [
     {
+      "id": "lang-english",
+      "name": "English 语言包",
+      "desc": "English 界面语言包(type:i18n 纯数据插件):安装并启用后,以插件方式向应用提供全部 339 条英文文案(与内置 en 同源同值)。用于语言包插件机制的演示与校验,也是后续多语言语言包的标准模板;无任何权限需求。",
+      "channels": {
+        "release": {
+          "version": "1.0.0",
+          "url": "https://raw.githubusercontent.com/zklmiao/prompt-vault/plugin-source/lang-english-1.0.0.zip",
+          "sha256": "8dda34c2c4f2577d1be39f50916c4f4f82244b0af9778881242defa1424d51b4"
+        }
+      },
+      "minAppVersion": "0.2.0-alpha",
+      "permissions": []
+    },
+    {
       "id": "token-monitor",
       "name": "Coding 套餐用量监控",
       "desc": "GLM / 火山方舟 / OpenCode Coding 套餐用量监控:圆球悬浮窗常驻桌面(5h 环形进度、左键轮换、右键菜单),主窗口面板含周限额、24h 聚合与 MCP 月度;需在面板中录入对应供应商 API Key。",
@@ -9,7 +23,7 @@
         "release": {
           "version": "1.0.0",
           "url": "https://raw.githubusercontent.com/zklmiao/prompt-vault/plugin-source/token-monitor-1.0.0.zip",
-          "sha256": "921c11982185acbe71259466ea9529fab51fd5ff29a74e0ce6e51bda38831104"
+          "sha256": "d975754628e9568f370589a0ead54573d766a82e9f1bad19e595eea0d39cda65"
         }
       },
       "minAppVersion": "0.2.0-alpha",

@@ -11,7 +11,12 @@
 https://github.com/zklmiao/prompt-vault#plugin-source
 ```
 
-市场刷新后即可安装(权限确认 → sha256 校验 → 解压落盘)。
+市场刷新后即可安装(权限确认 → sha256 校验 → 解压落盘)。当前收录:
+
+| 插件 | 版本 | 类型 | 权限 |
+|---|---|---|---|
+| Coding 套餐用量监控(token-monitor) | 1.0.0 | 界面插件(悬浮球+面板) | 9 项(三家联网+凭据+悬浮窗) |
+| English 语言包(lang-english) | 1.0.0 | 纯数据(type:i18n) | 无 |
 
 ## 更新流程
 
