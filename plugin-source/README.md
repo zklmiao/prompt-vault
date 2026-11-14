@@ -31,21 +31,23 @@ node serve.mjs
 ## 重新生成(IPv6 变化 / 插件更新后)
 
 ```powershell
-node build-source.mjs                # 自动探测全局 IPv6 + 8899 端口
-node build-source.mjs --base http://[<IPv6>]:8899/pv/plugins   # 显式指定
+node build-source.mjs                # 自动探测全局 IPv6,zip 前缀 = http://[<v6>]:8899/pv/plugins/raw/main
+node build-source.mjs --base <zip下载前缀>   # 显式指定(绝对 http(s) 前缀,拼 <id>-<version>.zip)
 ```
 
 - 打包器按 `plugins-src/<id>/manifest.json` 的 `id/version/minAppVersion/permissions` 生成
   清单与 `<id>-<version>.zip`;`desc.txt`(可选)作为市场展示描述。
-- zip `url` 采用 `raw/main/` 形态:本地 serve.mjs 与真实 gitee/gitea 托管同形状生效;
-  托管到 github/gitlab 等其他平台时按其 raw/release 规则调整 url 后重新生成。
+- `--base` 是**各托管平台对应的 raw 前缀**:
+  - github:`https://raw.githubusercontent.com/<owner>/<repo>/<branch>`
+  - gitee / gitea:`https://<host>/<owner>/<repo>/raw/main`
+  - 本地 serve.mjs:`http://[<IPv6>]:8899/pv/plugins/raw/main`(缺省自动探测)
 
 ## 上架到真实仓库
 
-1. 把本目录内容 push 到一个空仓库根(如 gitee 的 `pv-plugins` 仓库);
-2. `node build-source.mjs --base https://gitee.com/<owner>/<repo>` 重新生成清单
-   (zip url 会指向该仓库的 raw 地址);
-3. 应用里添加源 `https://gitee.com/<owner>/<repo>` → 市场安装。
+1. 把清单与 zip push 到仓库分支根(本仓库已推 `plugin-source` 孤儿分支,根即清单+zip);
+2. 用对应平台的 raw 前缀重新生成清单(命令见上节);
+3. 应用里添加源:github 填 `https://github.com/<owner>/<repo>#<branch>`,
+   gitee/gitea 填仓库主页地址 → 市场安装。
 
 ## 安全说明
 

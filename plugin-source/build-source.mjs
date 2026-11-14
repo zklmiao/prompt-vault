@@ -3,12 +3,16 @@
 // 与应用安装管线兼容:根级 manifest.json 布局)→ 计算 sha256 → 生成 pv-plugins.json。
 //
 // 用法:
-//   node build-source.mjs [--base <源主页地址>]
-//     --base  用户在「插件源」里填的仓库主页地址(gitea 形态:protocol://host[:port]/owner/repo)。
-//             缺省自动探测本机全局 IPv6 + 8899 端口(与 serve.mjs 配套)。
+//   node build-source.mjs [--base <zip 下载前缀>]
+//     --base  清单里 zip url 的前缀(绝对 http(s)),最终 zip url = <base>/<id>-<version>.zip。
+//             按托管平台给出对应 raw 前缀,例:
+//               github: https://raw.githubusercontent.com/<owner>/<repo>/<branch>
+//               gitee : https://gitee.com/<owner>/<repo>/raw/main
+//               本地  : http://[<全局IPv6>]:8899/pv/plugins/raw/main(缺省自动探测,配 serve.mjs)
 //   产物写在脚本所在目录(pv-plugins.json 与 <id>-<version>.zip)。
 //
-// 注意:zip `url` 必须是绝对 http(s) 地址(安装管线拒绝相对路径);IPv6 变化后重跑本脚本。
+// 注意:zip `url` 必须是绝对 http(s) 地址(安装管线拒绝相对路径);托管地址/分支/IPv6
+// 变化后重跑本脚本。
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -129,16 +133,16 @@ const v6 = detectGlobalV6();
 const base =
   args.base ??
   (v6
-    ? `http://[${v6}]:${DEFAULT_PORT}/pv/plugins`
+    ? `http://[${v6}]:${DEFAULT_PORT}/pv/plugins/raw/main`
     : null);
 if (!base) {
   console.error(
     "未探测到全局 IPv6 且未提供 --base。SSRF 防护拒绝环回/私网地址,\n" +
-      "请用本机公网地址执行:node build-source.mjs --base http://<host>[:port]/owner/repo",
+      "请用本机公网地址执行:node build-source.mjs --base http://<host>[:port]/raw前缀",
   );
   process.exit(1);
 }
-console.log(`源主页地址(base): ${base}`);
+console.log(`zip 下载前缀(base): ${base}`);
 
 const entries = readdirSync(pluginsSrcDir).filter((name) =>
   statSync(join(pluginsSrcDir, name)).isDirectory(),
@@ -171,11 +175,12 @@ for (const dirName of entries) {
     name: manifest.name,
     desc,
     channels: {
-      // zip URL 与 pv-plugins.json 自身获取路径同形状(gitea/gitee 的 raw 形态),
-      // 本地 serve.mjs 与真实 gitee/gitea 托管均按此重写生效
+      // zip url = <base>/<id>-<version>.zip;base 为托管平台对应的 raw 前缀
+      // (github: raw.githubusercontent.com/<owner>/<repo>/<branch>;
+      //  gitee/gitea: <home>/raw/main;本地: serve.mjs 打印的 raw 前缀)
       release: {
         version: manifest.version,
-        url: `${base}/raw/main/${zipName}`,
+        url: `${base}/${zipName}`,
         sha256,
       },
     },

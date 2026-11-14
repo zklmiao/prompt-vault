@@ -8,8 +8,8 @@
       "channels": {
         "release": {
           "version": "1.0.0",
-          "url": "http://[2409:8a55:30d4:b381:8c21:b19c:50b7:b5f8]:8899/pv/plugins/raw/main/token-monitor-1.0.0.zip",
-          "sha256": "2f8be92d3d202c3769c7b10cfa86ed58f8dbc64d405df20639586219fb4b6147"
+          "url": "https://raw.githubusercontent.com/zklmiao/prompt-vault/plugin-source/token-monitor-1.0.0.zip",
+          "sha256": "921c11982185acbe71259466ea9529fab51fd5ff29a74e0ce6e51bda38831104"
         }
       },
       "minAppVersion": "0.2.0-alpha",
