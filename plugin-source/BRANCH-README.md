@@ -15,7 +15,7 @@ https://github.com/zklmiao/prompt-vault#plugin-source
 
 | 插件 | 版本 | 类型 | 权限 |
 |---|---|---|---|
-| Coding 套餐用量监控(token-monitor) | 1.1.1 | 界面插件(悬浮球+面板) | 11 项(三家联网+凭据+悬浮窗) |
+| Coding 套餐用量监控(token-monitor) | 1.1.2 | 界面插件(悬浮球+面板) | 11 项(三家联网+凭据+悬浮窗) |
 | English 语言包(lang-english) | 1.0.0 | 纯数据(type:i18n) | 无 |
 
 ## 更新流程
