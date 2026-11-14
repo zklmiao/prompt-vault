@@ -1,6 +1,6 @@
 # Prompt Vault 待办与路线图
 
-> 最后更新:2026-11-14(P3 插件系统五批次完成;A9/A10 完成)。
+> 最后更新:2026-11-14(P3 插件系统五批次完成;A9/A10 完成;token-monitor 1.1.1 发布——市场更新链 reload 小修与双分支推送见 `2f33fcb`)。
 > 维护约定:所有未完成的计划都写在这里,不要只留在聊天记录里;完成后把 `[ ]` 改为 `[x]`,并注明提交号或版本。
 > 状态基线:v0.1.0 已发布(GitHub Release 双资产),此后新增功能均已提交:拖拽导入与批量操作(`66cf56a`)、使用统计与可配置热键(`5957037`)、自绘标题栏(`29dea01`)、QuickPick 2.0(`430fbd5`)、命令面板与速查表(`62a6a51`);当前版本 **0.2.0-alpha**(2026-11-14 已升,v0.1.9-alpha 与 v0.1.9.2-alpha 已发布、后者附首轮全量回归报告;0.2.0-alpha 的 GitHub Release 待手动发布)。
 
@@ -101,6 +101,10 @@
 - [x] **批次 3 · Token 圆球**:Rust 网络代理(SSRF 防护 + raw/bearer/volcengine HMAC 三认证模式)/ 凭据管理器流(Key 明文不出 Rust)/ 圆球悬浮窗(84px、单家显示、左键轮换切换、位置记忆)+ 主窗口详情面板(5h/周/24h 聚合/MCP 月度)/ GLM → 火山方舟 → OpenCode 逐家接入(关键提交:`84bf5d2`…`3c80fee`,Rust 侧合并 `05bc28f`)
 - [x] **批次 4 · MCP Server**:`--mcp` headless(stdio JSON-RPC,跳过 GUI/单实例)/ tools(search_prompts·get_prompt·list_tags·save_prompt 只增)+ 原生 prompts({{变量}}→MCP 参数)/ 数据文件命名互斥 + notify watcher(编辑态跳过刷新)/ 产品面板(默认关、风险明示、四客户端一键配置)(关键提交:headless `599ed67`、互斥 `3e45dcc`、watcher `a190f46`、面板 `3e43250`、跨窗口校验 P0 `42d7c8b`)
 - [x] **批次 5 · 收尾**:`npx tsc --noEmit` + `cargo test` + `npm run tauri build` + 刷 releases 冒烟 / README(功能表、隐私章节改「核心离线,插件按需联网」、快捷键)+ AGENTS.md 定位段同步改写(单 JSON·不联网 → 增 plugins.json·插件按需联网)/ 本 backlog 与设计文档勾选回写(关键提交:zip 解压限额加固 `efe5a58`、版本升 0.2.0-alpha `f51b106`、文档同步本批 docs 提交)
+
+### 实测发现缺陷(2026-11-14,C段实机验证抓出)
+
+- [ ] **球窗右键菜单:点击菜单项不收起菜单**(token-monitor,1.1.0 起存量,非 1.1.1 回归):`plugins-src/token-monitor/main.js` 的 `buildTmMenu` 内四处 `closeTmMenu()` 裸调用,而 `closeTmMenu(wrap)` 需要 wrap 实参才能找到菜单 —— 裸调用静默 early-return。现象:点账号行/立即刷新/打开面板/隐藏圆球,动作都执行但菜单保持展开、窗口保持扩窗尺寸,仅 `window blur`(879 行,唯一带 wrap 的调用)能收起。修复一行(四处调用传入 wrap 或改无参闭包),但属 main.js 功能层改动,超出纯 UI 适配卡禁区,待下轮插件卡处理;届时同步补 main.js 单测或 ball-harness 断言。
 
 ### v2(已定,不承诺时间)
 
