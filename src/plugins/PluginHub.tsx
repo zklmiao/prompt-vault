@@ -48,6 +48,8 @@ export function parseRepoHome(url: string): {
   owner: string;
   repo: string;
   host: string | null;
+  /** #分支 后缀(D4);缺省 null → Rust 走 main→master 默认分支探测 */
+  branch: string | null;
 } | null {
   try {
     const u = new URL(url.trim());
@@ -69,7 +71,12 @@ export function parseRepoHome(url: string): {
           u.hostname +
           (u.port ? `:${u.port}` : "")
         : null;
-    return { provider, owner, repo, host };
+    // #分支 后缀(D4):fragment 即分支名,trim 后透传(Rust validate_git_ref 兜底校验)
+    const branch =
+      u.hash && u.hash.length > 1
+        ? decodeURIComponent(u.hash.slice(1)).trim() || null
+        : null;
+    return { provider, owner, repo, host, branch };
   } catch {
     return null;
   }
@@ -191,7 +198,7 @@ export default function PluginHub({
         provider: parsed.provider,
         owner: parsed.owner,
         repo: parsed.repo,
-        branch: source.branch,
+        branch: parsed.branch ?? source.branch,
         host: parsed.host,
       });
       setMarket(m);
@@ -334,7 +341,7 @@ export default function PluginHub({
       name: `${parsed.owner}/${parsed.repo}`,
       provider,
       url: addUrl.trim(),
-      branch: null,
+      branch: parsed.branch,
     };
     const next = await mutateState((st) => {
       st.sources = [...st.sources, source];
