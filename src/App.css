@@ -334,6 +334,34 @@ textarea.mono {
   cursor: default;
 }
 
+/* 通用输入件(.input/.select):与 .field input 同观感;插件区与插件面板共用 */
+.input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--text);
+  transition: border-color 0.15s ease;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.input.small {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
 .icon-btn {
   width: 32px;
   height: 32px;
@@ -1827,10 +1855,32 @@ mark.hl {
   text-align: center;
 }
 
+/* 添加插件源:标题 + 引导 + 行内表单,收进一张卡 */
+.ph-add-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.ph-add-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ph-add-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 .ph-form {
   display: flex;
   gap: 8px;
-  margin-bottom: 8px;
 }
 
 .ph-form .input {
@@ -1840,6 +1890,61 @@ mark.hl {
 
 .ph-form .select {
   flex: 0 0 130px;
+}
+
+/* 源行:自定义 radio 圆点;激活行 accent 描边 + 徽标 */
+.ph-row.source {
+  cursor: pointer;
+  position: relative;
+  padding-right: 38px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ph-row.source input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+  transition: border-color 0.15s ease;
+}
+
+.ph-row.source input[type="radio"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: scale(0);
+  transition: transform 0.12s ease;
+}
+
+.ph-row.source input[type="radio"]:checked {
+  border-color: var(--accent);
+}
+
+.ph-row.source input[type="radio"]:checked::before {
+  transform: scale(1);
+}
+
+.ph-row.source.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ph-row.source.active:hover {
+  background: var(--accent-soft);
+}
+
+/* 激活行底色是 accent-soft:行内中性徽标改面板色底,避免同族过淡不可辨 */
+.ph-row.source.active .badge {
+  background: var(--panel);
 }
 
 .ph-market-head {
@@ -1852,6 +1957,64 @@ mark.hl {
   padding: 2px 2px 6px;
 }
 
+.ph-market-source {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ph-market-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 市场行:图标块 + 两行简介 + 底部 meta 行(要求版本左,通道/安装右) */
+.ph-row.market {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ph-market-icon {
+  width: 38px;
+  height: 38px;
+  margin-top: 2px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ph-row-desc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ph-market-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ph-market-foot .ph-row-sub {
+  margin-top: 0;
+}
+
 .ph-row {
   display: flex;
   align-items: center;
@@ -1860,12 +2023,6 @@ mark.hl {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-}
-
-.ph-row.source {
-  cursor: pointer;
-  position: relative;
-  padding-right: 38px;
 }
 
 /* 源行删除按钮:悬停/聚焦显现(行是 label,按钮内已 preventDefault 防误激活) */

@@ -127,6 +127,13 @@ export default function PluginHub({
     [t],
   );
 
+  /** 源行的平台徽标文案(ProviderKind 已在添加时定形,无 auto) */
+  const providerLabel = useCallback(
+    (provider: ProviderKind): string =>
+      provider === "gitea" ? t("ph.providerGitea") : provider.charAt(0).toUpperCase() + provider.slice(1),
+    [t],
+  );
+
   /** 权限串的中文说明(未知形状原样展示) */
   const permissionHint = useCallback(
     (p: string): string => {
@@ -510,41 +517,48 @@ export default function PluginHub({
 
   const renderSources = () => (
     <div className="ph-list">
-      <div className="ph-form">
-        <input
-          className="input"
-          placeholder={t("ph.urlPlaceholder")}
-          value={addUrl}
-          onChange={(e) => setAddUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              void handleAddSource();
-            }
-          }}
-        />
-        <select
-          className="input select"
-          value={addProvider}
-          onChange={(e) => setAddProvider(e.target.value as "auto" | ProviderKind)}
-          title={t("ph.providerTitle")}
-        >
-          <option value="auto">{t("ph.providerAuto")}</option>
-          <option value="github">GitHub</option>
-          <option value="gitee">Gitee</option>
-          <option value="gitlab">GitLab</option>
-          <option value="gitea">{t("ph.providerGitea")}</option>
-        </select>
-        <button
-          className="btn primary"
-          disabled={addUrl.trim() === ""}
-          onClick={() => void handleAddSource()}
-        >
-          {t("ph.addSource")}
-        </button>
+      <div className="ph-add-card">
+        <div className="ph-add-title">{t("ph.addSourceTitle")}</div>
+        <div className="ph-add-hint">{t("ph.addSourceHint")}</div>
+        <div className="ph-form">
+          <input
+            className="input"
+            placeholder={t("ph.urlPlaceholder")}
+            value={addUrl}
+            onChange={(e) => setAddUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                void handleAddSource();
+              }
+            }}
+          />
+          <select
+            className="input select"
+            value={addProvider}
+            onChange={(e) => setAddProvider(e.target.value as "auto" | ProviderKind)}
+            title={t("ph.providerTitle")}
+          >
+            <option value="auto">{t("ph.providerAuto")}</option>
+            <option value="github">GitHub</option>
+            <option value="gitee">Gitee</option>
+            <option value="gitlab">GitLab</option>
+            <option value="gitea">{t("ph.providerGitea")}</option>
+          </select>
+          <button
+            className="btn primary"
+            disabled={addUrl.trim() === ""}
+            onClick={() => void handleAddSource()}
+          >
+            {t("ph.addSource")}
+          </button>
+        </div>
       </div>
       {state && state.sources.length > 0 ? (
         state.sources.map((s) => (
-          <label className="ph-row source" key={s.id}>
+          <label
+            className={"ph-row source" + (state.activeSourceId === s.id ? " active" : "")}
+            key={s.id}
+          >
             <input
               type="radio"
               name="active-source"
@@ -553,7 +567,13 @@ export default function PluginHub({
               title={t("ph.setActiveSource")}
             />
             <div className="ph-row-main">
-              <div className="ph-row-title">{s.name}</div>
+              <div className="ph-row-title">
+                {s.name}
+                <span className="badge">{providerLabel(s.provider)}</span>
+                {state.activeSourceId === s.id ? (
+                  <span className="badge ok">{t("ph.activeSourceBadge")}</span>
+                ) : null}
+              </div>
               <div className="ph-row-sub">
                 {s.url}
                 {s.branch ? t("ph.sourceBranchSuffix", { branch: s.branch }) : ""}
@@ -590,8 +610,9 @@ export default function PluginHub({
     return (
       <div className="ph-list">
         <div className="ph-market-head">
-          <span>
-            {t("ph.marketSource", { name: market?.name || activeSource.name })}
+          <span className="ph-market-source">
+            {t("ph.marketSourcePrefix")}
+            <span className="ph-market-name">{market?.name || activeSource.name}</span>
             {marketLoading ? t("ph.fetchingSuffix") : ""}
           </span>
           <button
@@ -733,6 +754,9 @@ function MarketRow({
   const installedCurrent = !!(installed && ref && installed.version === ref.version);
   return (
     <div className="ph-row market">
+      <div className="ph-market-icon">
+        <IconPlugin size={18} />
+      </div>
       <div className="ph-row-main">
         <div className="ph-row-title">
           {entry.name}
@@ -740,40 +764,42 @@ function MarketRow({
             <span className="badge ok">{t("ph.installedVersion", { version: installed.version })}</span>
           ) : null}
         </div>
-        <div className="ph-row-sub">{entry.desc || entry.id}</div>
-        {entry.minAppVersion ? (
-          <div className="ph-row-sub muted">{t("ph.reqAppVersion", { version: entry.minAppVersion })}</div>
-        ) : null}
-      </div>
-      <div className="ph-row-actions">
-        <select
-          className="input select small"
-          value={channel}
-          onChange={(e) => setChannel(e.target.value as Channel)}
-          title={t("ph.chooseChannel")}
-        >
-          {entry.release ? (
-            <option value="release">
-              {channelLabel("release")} {entry.release.version}
-            </option>
-          ) : null}
-          {entry.beta ? (
-            <option value="beta">
-              {channelLabel("beta")} {entry.beta.version}
-            </option>
-          ) : null}
-        </select>
-        <button
-          className="btn small primary"
-          disabled={busy || !ref || installedCurrent}
-          onClick={() => onPick(channel)}
-        >
-          {installedCurrent
-            ? t("ph.upToDate")
-            : ref
-              ? t("ph.installVersion", { version: ref.version })
-              : t("ph.noPackage")}
-        </button>
+        <div className="ph-row-desc">{entry.desc || entry.id}</div>
+        <div className="ph-market-foot">
+          <span className="ph-row-sub muted">
+            {entry.minAppVersion ? t("ph.reqAppVersion", { version: entry.minAppVersion }) : ""}
+          </span>
+          <div className="ph-row-actions">
+            <select
+              className="input select small"
+              value={channel}
+              onChange={(e) => setChannel(e.target.value as Channel)}
+              title={t("ph.chooseChannel")}
+            >
+              {entry.release ? (
+                <option value="release">
+                  {channelLabel("release")} {entry.release.version}
+                </option>
+              ) : null}
+              {entry.beta ? (
+                <option value="beta">
+                  {channelLabel("beta")} {entry.beta.version}
+                </option>
+              ) : null}
+            </select>
+            <button
+              className={"btn small" + (installedCurrent || !ref ? "" : " primary")}
+              disabled={busy || !ref || installedCurrent}
+              onClick={() => onPick(channel)}
+            >
+              {installedCurrent
+                ? t("ph.upToDate")
+                : ref
+                  ? t("ph.installVersion", { version: ref.version })
+                  : t("ph.noPackage")}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
