@@ -35,6 +35,6 @@
 
 ## 预览与测试
 
-- 纯浏览器预览:`npx vite --config preview/vite.preview.config.ts`(端口 1421);
+- 纯浏览器预览:`npx vite --config preview/vite.preview.config.ts`(端口 4173);
 - QuickPick 窗口、托盘、全局热键、Mica 等 Rust 侧行为只能打包后用 `npm run tauri dev` 或 exe 人工验证;
 - 构建产物与源码一致性:构建后确认 `releases/` 时间戳更新。
