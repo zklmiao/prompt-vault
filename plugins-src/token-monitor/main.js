@@ -1,18 +1,30 @@
 /**
- * Coding 套餐用量监控 —— 数据层 + UI 层(批次 3)
+ * Coding 套餐用量监控 —— 数据层 + UI 层(多账号:同供应商可录多个 Key)
  *
  * 数据层:GLM(智谱)/ 火山方舟 / OpenCode 三家套餐用量的取数与解析,
  * 统一输出 { provider, fiveHour:{percent, resetAt}, weekly:{...}, tokens24h?, mcpMonthly? }。
  *   - percent:0-100 数值(非法/缺失为 null;火山限流语义见 parseOpencodeUsage);
  *   - resetAt:ISO 8601 UTC 字符串或 null(各家的毫秒/秒时间戳在此统一归一);
- *   - tokens24h 仅 GLM;mcpMonthly 仅 GLM(MCP 月度,字段原样透传)。
+ *   - tokens24h 仅 GLM 系;mcpMonthly 仅 GLM 系(MCP 月度,字段原样透传)。
+ *
+ * 多账号模型(K 开工卡):
+ *   - 账号 = {provider, label};账号 id/scope = `provider:label`(与 Rust scope 语法
+ *     `<provider>[:<label>]` 对齐);provider ∈ {glm, glm-intl, volcengine,
+ *     volcengine-intl, opencode}(端点变体即 provider,端点是账号属性);
+ *   - Key 经 pv.credentials.set('provider:label', key) 进凭据管理器(明文不出 Rust);
+ *   - 账号清单存 kv tm.accounts,清单单写者 = 面板实例(主窗);球实例只读,
+ *     空清单时以 configured() 探测的 default 账号作内存 fallback 视图(不写 kv);
+ *   - 迁移(面板实例,惰性):tm.accounts 缺失/为空 → 探测已配置 provider →
+ *     命中者建 {provider, label:"default"} 入清单(幂等,仅命中才落盘);
+ *   - cache 键按账号粒度 cache:<provider>:<label>;label "default" 读取回落旧
+ *     cache:<provider>(旧单账号缓存兼容,显示后新键接管写)。
  *
  * UI 层(消费 window.pvTokenMonitor):
- *   - 球体:pv.window.setup({ size:{84,84}, onMount }) —— SVG 圆环(当前供应商 5h
- *     百分比),左键轮换已配置供应商,右键菜单(直选/立即刷新/打开详情面板/隐藏),
- *     悬停 tooltip;位置不感知不落盘(Rust Moved 防抖独占写 kv,见设计 §5.1);
- *   - 详情面板:pv.panel.register —— 每家一张卡(5h/周/24h/MCP 月度)+ 设置区
- *     (Key 录入走凭据桥,轮询开关存 ball.poll);
+ *   - 球体:pv.window.setup({ size:{84,84}, onMount }) —— SVG 圆环(当前账号 5h
+ *     百分比),左键在全部已配置账号间轮换,右键菜单(按供应商分组直选/立即刷新/
+ *     打开详情面板/隐藏),悬停 tooltip(供应商+label);位置不感知不落盘;
+ *   - 详情面板:pv.panel.register —— 每账号一张卡(5h/周/24h/MCP 月度)+ 设置区
+ *     (添加账号:供应商下拉+标签+Key;账号列表;轮询开关存 ball.poll)。
  *
  * 约定:
  *   - pv-1 书写形态:本文件只写 IIFE 函数体,由宿主包进
@@ -23,33 +35,53 @@
  *     Key 明文不出 Rust 进程,本文件接触不到任何凭据;
  *   - 解析函数全部为无副作用的纯函数,便于用假响应单测;
  *   - 双实例语义(设计 §5.1):本文件在主窗(面板实例)与球窗(球实例)各注入一次,
- *     registry 每窗口独立,事件总线不跨窗口;cache:<provider>(kv)是两实例唯一
- *     共享数据面(球实例写、面板实例读,last-wins)。两个实例都注册 panel 与
+ *     registry 每窗口独立,事件总线不跨窗口;kv 是两实例唯一共享数据面
+ *     (清单单写者=面板实例,cache 双实例写,last-wins)。两个实例都注册 panel 与
  *     window.setup:panel 只会在主窗被渲染,setup 的 onMount 只会在球窗被调用。
  *
- * 存储键契约(§5.1):
+ * 存储键契约(§5.1 + 多账号):
  *   window:visible(bool)—— 插件写(隐藏前落盘 false),宿主启动读(缺省视为 true);
  *   window:x / window:y(int,物理像素)—— 仅 Rust 拖动防抖独占写,插件不感知;
- *   ball.provider —— 当前供应商;ball.poll = {enabled, intervalSec}(钳制 ≥120s,默认关);
- *   cache:<provider> —— 最近一次成功数据 + fetchedAt,失败不覆盖。
+ *   ball.provider —— 当前账号('provider:label';旧值裸 provider 读取时升级
+ *     '<provider>:default',保序不丢);
+ *   ball.poll = {enabled, intervalSec}(钳制 ≥120s,默认关);
+ *   tm.accounts —— 账号清单 [{provider,label}](清单单写者=面板实例);
+ *   cache:<provider>:<label> —— 每账号最近一次成功数据 + fetchedAt,失败不覆盖;
+ *     label "default" 读取回落旧 cache:<provider>(旧单账号缓存兼容)。
  */
 
-  // ============ 常量:三家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
+  // ============ 常量:五家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
 
-  var GLM_BASE = 'https://open.bigmodel.cn';        // 国内版
-  var GLM_BASE_GLOBAL = 'https://api.z.ai';          // 国际版(kv ball.glmGlobal = true 时启用)
-  var VOLC_HOST = 'https://ark.cn-beijing.volcengineapi.com';   // 国内版
-  var VOLC_HOST_GLOBAL = 'https://ark.ap-southeast.bytepluses.com'; // 国际版(kv ball.volcGlobal)
-  var OPENCODE_URL = 'https://opencode.ai/zen/go/v1/usage';
-  var KV_GLM_GLOBAL = 'ball.glmGlobal';              // GLM 国际版开关(bool,默认国内)
-  var KV_VOLC_GLOBAL = 'ball.volcGlobal';            // 火山国际版开关(bool,默认国内)
-
-  /** 供应商元信息:label 供详情面板,abbr 供圆球中心缩写(设计 §5.1:GLM / ARK / OC) */
+  /**
+   * 供应商元信息:端点变体即 provider(国际同 abbr + 角标 i)。
+   * label 供详情面板/球菜单分组;abbr 供圆球中心缩写(设计 §5.1:GLM / ARK / OC);
+   * endpoint/host 为该 provider 的取数端点(账号属性,替代旧国际版开关);
+   * family:glm 系(含国际)共享 24h 聚合与 MCP 月度两行。
+   */
   var PROVIDERS = {
-    glm: { label: 'GLM Coding', abbr: 'GLM' },
-    volcengine: { label: '火山方舟', abbr: 'ARK' },
-    opencode: { label: 'OpenCode', abbr: 'OC' }
+    glm: {
+      label: 'GLM Coding', abbr: 'GLM', family: 'glm',
+      endpoint: 'https://open.bigmodel.cn', host: 'open.bigmodel.cn'
+    },
+    'glm-intl': {
+      label: 'GLM Coding 国际版', abbr: 'GLM', intl: true, family: 'glm',
+      endpoint: 'https://api.z.ai', host: 'api.z.ai'
+    },
+    volcengine: {
+      label: '火山方舟', abbr: 'ARK', family: 'volcengine',
+      endpoint: 'https://ark.cn-beijing.volcengineapi.com', host: 'ark.cn-beijing.volcengineapi.com'
+    },
+    'volcengine-intl': {
+      label: '火山方舟国际版', abbr: 'ARK', intl: true, family: 'volcengine',
+      endpoint: 'https://ark.ap-southeast.bytepluses.com', host: 'ark.ap-southeast.bytepluses.com'
+    },
+    opencode: {
+      label: 'OpenCode', abbr: 'OC', family: 'opencode',
+      endpoint: 'https://opencode.ai/zen/go/v1/usage', host: 'opencode.ai'
+    }
   };
+
+  var PROVIDER_ORDER = ['glm', 'glm-intl', 'volcengine', 'volcengine-intl', 'opencode'];
 
   // ============ 纯函数:归一化工具 ============
 
@@ -82,6 +114,45 @@
     }
     var parsed = new Date(String(value));
     return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  // ============ 纯函数:账号模型(与 Rust scope 语法对齐) ============
+
+  /** 账号 → scope/id 字符串 `provider:label` */
+  function accountScope(account) {
+    return account.provider + ':' + account.label;
+  }
+
+  /** 账号标签校验:与 Rust label 段同一字符集 [A-Za-z0-9_-\u4e00-\u9fa5]{1,16}
+   *  (禁冒号/斜杠/空白 —— 与 Rust 前缀权限门控和 cache 键解析对齐) */
+  function isValidLabel(label) {
+    return typeof label === 'string'
+      && /^[\u4e00-\u9fa5A-Za-z0-9_-]{1,16}$/.test(label);
+  }
+
+  /** 任意值 → 合法账号数组(纠偏:丢非法项、去重,保序);非数组返回 [] */
+  function sanitizeAccounts(value) {
+    if (!Array.isArray(value)) return [];
+    var out = [];
+    for (var i = 0; i < value.length; i++) {
+      var item = value[i];
+      if (!item || typeof item !== 'object') continue;
+      if (!PROVIDERS[item.provider] || !isValidLabel(item.label)) continue;
+      var scope = accountScope(item);
+      var dup = false;
+      for (var j = 0; j < out.length; j++) {
+        if (accountScope(out[j]) === scope) { dup = true; break; }
+      }
+      if (dup) continue;
+      out.push({ provider: item.provider, label: item.label });
+    }
+    return out;
+  }
+
+  /** 选择值升级:旧值裸 provider(无冒号)→ '<provider>:default';其余原样 */
+  function upgradeSelection(saved) {
+    if (typeof saved !== 'string' || saved === '') return null;
+    return saved.indexOf(':') >= 0 ? saved : saved + ':default';
   }
 
   // ============ 纯函数:GLM 响应解析 ============
@@ -240,67 +311,62 @@
     });
   }
 
-  /** GLM:quota/limit(套餐窗口 + MCP 月度)+ model-usage(近 24h 聚合),mode raw。
-   *  base 现读 kv(ball.glmGlobal):国际版 https://api.z.ai,国内 open.bigmodel.cn;
-   *  面板/球两实例都现读,切换开关后下一次取数即用新 base */
-  function fetchGlm() {
-    return pv.storage.get(KV_GLM_GLOBAL).then(function (isGlobal) {
-      var base = isGlobal === true ? GLM_BASE_GLOBAL : GLM_BASE;
-      var quotaPromise = callNet(base + '/api/monitor/usage/quota/limit', {
-        authFrom: 'credential:glm',
-        mode: 'raw'
-      }).then(parseJson).then(parseGlmQuota);
-      // 时间参数格式 yyyy-MM-dd HH:mm:ss,URL 编码后拼 query
-      var range = glmDayRange(new Date());
-      var usageQuery =
-        '?startTime=' + encodeURIComponent(range.startTime) +
-        '&endTime=' + encodeURIComponent(range.endTime);
-      var usagePromise = callNet(base + '/api/monitor/usage/model-usage' + usageQuery, {
-        authFrom: 'credential:glm',
-        mode: 'raw'
-      }).then(parseJson).then(parseGlmModelUsage);
-      return Promise.all([quotaPromise, usagePromise]).then(function (results) {
-        var quota = results[0];
-        var tokens = results[1];
-        return {
-          provider: 'glm',
-          fiveHour: quota.fiveHour,
-          weekly: quota.weekly,
-          mcpMonthly: quota.mcpMonthly,
-          tokens24h: tokens.tokens24h
-        };
-      });
+  /** GLM 系(GLM/GLM 国际):quota/limit + model-usage(近 24h 聚合),mode raw。
+   *  端点是账号属性(国内 open.bigmodel.cn / 国际 api.z.ai 由 provider 决定) */
+  function fetchGlm(account) {
+    var base = PROVIDERS[account.provider].endpoint;
+    var auth = 'credential:' + accountScope(account);
+    var quotaPromise = callNet(base + '/api/monitor/usage/quota/limit', {
+      authFrom: auth,
+      mode: 'raw'
+    }).then(parseJson).then(parseGlmQuota);
+    // 时间参数格式 yyyy-MM-dd HH:mm:ss,URL 编码后拼 query
+    var range = glmDayRange(new Date());
+    var usageQuery =
+      '?startTime=' + encodeURIComponent(range.startTime) +
+      '&endTime=' + encodeURIComponent(range.endTime);
+    var usagePromise = callNet(base + '/api/monitor/usage/model-usage' + usageQuery, {
+      authFrom: auth,
+      mode: 'raw'
+    }).then(parseJson).then(parseGlmModelUsage);
+    return Promise.all([quotaPromise, usagePromise]).then(function (results) {
+      var quota = results[0];
+      var tokens = results[1];
+      return {
+        provider: account.provider,
+        fiveHour: quota.fiveHour,
+        weekly: quota.weekly,
+        mcpMonthly: quota.mcpMonthly,
+        tokens24h: tokens.tokens24h
+      };
     });
   }
 
-  /** 火山:GetAFPUsage,mode volcengine(V4 签名双头 X-Date/Authorization 在 Rust 内完成)。
-   *  host 现读 kv(ball.volcGlobal):国内 ark.cn-beijing.volcengineapi.com,
-   *  国际 ark.ap-southeast.bytepluses.com;Rust 签名 region 随 host 推导 */
-  function fetchVolcengine() {
-    return pv.storage.get(KV_VOLC_GLOBAL).then(function (isGlobal) {
-      var host = isGlobal === true ? VOLC_HOST_GLOBAL : VOLC_HOST;
-      return callNet(host + '/?Action=GetAFPUsage&Version=2024-01-01', {
-        authFrom: 'credential:volcengine',
-        mode: 'volcengine'
-      })
-        .then(parseJson)
-        .then(function (payload) {
-          var usage = parseVolcUsage(payload);
-          return { provider: 'volcengine', fiveHour: usage.fiveHour, weekly: usage.weekly };
-        });
-    });
+  /** 火山系(国内/国际):GetAFPUsage,mode volcengine(V4 签名双头 X-Date/Authorization
+   *  在 Rust 内完成);host 为账号端点,Rust 签名 region 随 host 推导(零 Rust 改动) */
+  function fetchVolcengine(account) {
+    var host = PROVIDERS[account.provider].endpoint;
+    return callNet(host + '/?Action=GetAFPUsage&Version=2024-01-01', {
+      authFrom: 'credential:' + accountScope(account),
+      mode: 'volcengine'
+    })
+      .then(parseJson)
+      .then(function (payload) {
+        var usage = parseVolcUsage(payload);
+        return { provider: account.provider, fiveHour: usage.fiveHour, weekly: usage.weekly };
+      });
   }
 
   /** OpenCode:zen/go/v1/usage,mode bearer */
-  function fetchOpencode() {
-    return callNet(OPENCODE_URL, {
-      authFrom: 'credential:opencode',
+  function fetchOpencode(account) {
+    return callNet(PROVIDERS[account.provider].endpoint, {
+      authFrom: 'credential:' + accountScope(account),
       mode: 'bearer'
     })
       .then(parseJson)
       .then(function (payload) {
         var usage = parseOpencodeUsage(payload);
-        return { provider: 'opencode', fiveHour: usage.fiveHour, weekly: usage.weekly };
+        return { provider: account.provider, fiveHour: usage.fiveHour, weekly: usage.weekly };
       });
   }
 
@@ -308,42 +374,49 @@
 
   var FETCHERS = {
     glm: fetchGlm,
+    'glm-intl': fetchGlm,
     volcengine: fetchVolcengine,
+    'volcengine-intl': fetchVolcengine,
     opencode: fetchOpencode
   };
 
   /**
-   * 刷新指定供应商,resolve 统一结构:
+   * 刷新指定账号,resolve 统一结构:
    * { provider, fiveHour:{percent, resetAt}, weekly:{percent, resetAt}, tokens24h?, mcpMonthly? }
-   * 失败 reject Error(桥未就绪 / HTTP 非 2xx / 响应非 JSON / 解析异常),由 UI 层 toast。
+   * 失败 reject Error(桥未就绪 / HTTP 非 2xx / 响应非 JSON / 解析异常),由 UI 层按账号粒度上报。
    */
-  function refreshProvider(provider) {
-    var fetcher = FETCHERS[provider];
-    if (!fetcher) return Promise.reject(new Error('未知的供应商:' + provider));
-    return fetcher();
+  function refreshAccount(account) {
+    var fetcher = FETCHERS[account.provider];
+    if (!fetcher) return Promise.reject(new Error('未知的供应商:' + account.provider));
+    return fetcher(account);
   }
 
-  // 暴露给宿主 UI 与后续单测(假响应直喂各 parse 纯函数)
+  // 暴露给宿主 UI 与后续单测(假响应直喂各 parse 纯函数;账号纯函数供 node 回归)
   window.pvTokenMonitor = {
     providers: Object.keys(FETCHERS),
     meta: PROVIDERS,
-    refreshProvider: refreshProvider,
+    refreshAccount: refreshAccount,
     parseGlmQuota: parseGlmQuota,
     parseGlmModelUsage: parseGlmModelUsage,
     parseVolcUsage: parseVolcUsage,
     parseOpencodeUsage: parseOpencodeUsage,
-    glmDayRange: glmDayRange
+    glmDayRange: glmDayRange,
+    accountScope: accountScope,
+    isValidLabel: isValidLabel,
+    sanitizeAccounts: sanitizeAccounts,
+    upgradeSelection: upgradeSelection
   };
 
-  /* ==================== UI 层(批次 3) ==================== */
+  /* ==================== UI 层(多账号) ==================== */
 
   // ---------- 常量与存储键(契约见文件头) ----------
 
   var KV_VISIBLE = 'window:visible';
   var KV_X = 'window:x';          // 仅 Rust 写,插件不读写
   var KV_Y = 'window:y';          // 仅 Rust 写,插件不读写
-  var KV_PROVIDER = 'ball.provider';
+  var KV_PROVIDER = 'ball.provider';  // 值为 'provider:label';旧值裸 provider 读取时升级
   var KV_POLL = 'ball.poll';
+  var KV_ACCOUNTS = 'tm.accounts';    // 账号清单(单写者=面板实例)
   var KV_CACHE_PREFIX = 'cache:';
   var BALL_SIZE = 84;             // 球窗边长(与设计 §5.1 一致)
   var MENU_WIDTH = 172;           // 右键菜单宽度
@@ -355,9 +428,10 @@
   var TM_I18N = {
     zh: {
       panelTitle: '用量监控',
-      ballEmpty: '尚未配置供应商:请在详情面板录入 Key',
+      ballEmpty: '尚未配置账号:请在详情面板添加账号并录入 Key',
       ballIdle: '左键轮换 · 右键菜单 · 边缘拖动',
       refreshNow: '立即刷新',
+      refreshAll: '全部刷新',
       openPanel: '打开详情面板',
       hideBall: '隐藏圆球',
       fiveHour: '5h',
@@ -365,29 +439,31 @@
       tokens24h: '24h Token',
       mcpMonthly: 'MCP 月度',
       noData: '暂无数据',
+      panelEmpty: '尚未配置账号:请在下方添加账号并录入 Key',
+      addAccount: '添加账号',
+      providerPh: '选择供应商',
+      labelPh: '账号标签(如 主号/备用)',
       keyPlaceholder: '粘贴 API Key',
-      configured: '已配置 · 可更换',
+      addBtn: '添加',
+      accountList: '账号列表',
+      configured: '已配置',
       notConfigured: '未配置',
-      saveKey: '录入',
-      removeKey: '删除',
-      keySaved: 'Key 已录入',
-      keyDeleted: 'Key 已删除',
+      removeAccount: '删除',
+      labelInvalid: '标签需为 1-16 位字母/数字/下划线/连字符/中文(禁冒号斜杠空白)',
+      labelDuplicate: '同一供应商下已有同名账号',
+      keyRequired: 'Key 不能为空',
+      addOk: '账号已添加',
       pollLabel: '自动轮询(球窗常驻刷新)',
       pollInterval: '间隔(秒,≥120)',
-      credSavedToast: 'Key 已录入(仅存凭据管理器)',
-      credDeletedToast: 'Key 已删除',
       credFail: '凭据操作失败:',
-      errPrefix: '取数失败:',
-      glmGlobal: '国际版 (api.z.ai)',
-      glmGlobalTitle: 'Key 来自智谱国际版时勾选(端点切换为 api.z.ai)',
-      volcGlobal: '国际版 (bytepluses.com)',
-      volcGlobalTitle: 'AK/SK 来自火山引擎国际站时勾选(端点切换为 bytepluses.com)'
+      errPrefix: '取数失败:'
     },
     en: {
       panelTitle: 'Usage Monitor',
-      ballEmpty: 'No provider configured: add a key in the details panel',
+      ballEmpty: 'No account configured: add one in the details panel',
       ballIdle: 'Click to rotate · Right-click menu · Drag edges',
       refreshNow: 'Refresh now',
+      refreshAll: 'Refresh all',
       openPanel: 'Open details panel',
       hideBall: 'Hide ball',
       fiveHour: '5h',
@@ -395,23 +471,24 @@
       tokens24h: '24h Tokens',
       mcpMonthly: 'MCP monthly',
       noData: 'No data yet',
+      panelEmpty: 'No account configured: add one below and paste its key',
+      addAccount: 'Add account',
+      providerPh: 'Select provider',
+      labelPh: 'Account label (e.g. main/spare)',
       keyPlaceholder: 'Paste API key',
-      configured: 'Configured · replaceable',
+      addBtn: 'Add',
+      accountList: 'Accounts',
+      configured: 'Configured',
       notConfigured: 'Not configured',
-      saveKey: 'Save',
-      removeKey: 'Remove',
-      keySaved: 'Key saved',
-      keyDeleted: 'Key removed',
+      removeAccount: 'Remove',
+      labelInvalid: 'Label must be 1-16 chars of letters/digits/underscore/hyphen/CJK',
+      labelDuplicate: 'An account with the same label already exists for this provider',
+      keyRequired: 'Key is required',
+      addOk: 'Account added',
       pollLabel: 'Auto poll (ball refresh)',
       pollInterval: 'Interval (sec, ≥120)',
-      credSavedToast: 'Key saved (credential manager only)',
-      credDeletedToast: 'Key removed',
       credFail: 'Credential operation failed: ',
-      errPrefix: 'Fetch failed: ',
-      glmGlobal: 'Global (api.z.ai)',
-      glmGlobalTitle: 'Check if the key is from Z.ai global (endpoint api.z.ai)',
-      volcGlobal: 'Global (bytepluses.com)',
-      volcGlobalTitle: 'Check if AK/SK is from Volcengine global (endpoint bytepluses.com)'
+      errPrefix: 'Fetch failed: '
     }
   };
 
@@ -454,20 +531,25 @@
     return Math.max(POLL_MIN_SEC, Math.round(n));
   }
 
-  /** 拉取并写缓存:成功刷新缓存(带 fetchedAt),失败不覆盖上次成功 cache */
-  function fetchAndCache(provider) {
-    return window.pvTokenMonitor.refreshProvider(provider).then(function (data) {
+  /** 拉取并写缓存:成功刷新该账号缓存(带 fetchedAt),失败不覆盖上次成功 cache */
+  function fetchAndCache(account) {
+    return window.pvTokenMonitor.refreshAccount(account).then(function (data) {
       data.fetchedAt = Date.now();
-      return pv.storage.set(KV_CACHE_PREFIX + provider, data)
+      return pv.storage.set(KV_CACHE_PREFIX + accountScope(account), data)
         .then(function () { return data; })
         .catch(function () { return data; }); // 缓存写失败不影响本次数据展示
     });
   }
 
-  /** 读取上次成功 cache:<provider>(无数据返回 null) */
-  function readCache(provider) {
-    return pv.storage.get(KV_CACHE_PREFIX + provider).then(function (data) {
-      return data && typeof data === 'object' ? data : null;
+  /** 读取该账号上次成功 cache:<provider>:<label>(label "default" 回落旧
+   *  cache:<provider> 兼容旧单账号缓存;无数据返回 null) */
+  function readCache(account) {
+    return pv.storage.get(KV_CACHE_PREFIX + accountScope(account)).then(function (data) {
+      if (data && typeof data === 'object') return data;
+      if (account.label !== 'default') return null;
+      return pv.storage.get(KV_CACHE_PREFIX + account.provider).then(function (old) {
+        return old && typeof old === 'object' ? old : null;
+      });
     }).catch(function () { return null; });
   }
 
@@ -476,6 +558,79 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = text;
     return node;
+  }
+
+  // ---------- 实例判定:球窗(label = pv-plugin-<id>)不写账号清单 ----------
+
+  var IS_BALL_WINDOW = (function () {
+    try {
+      var internals = window.__TAURI_INTERNALS__;
+      var meta = internals && internals.metadata;
+      var label = meta && meta.currentWindow && meta.currentWindow.label;
+      return label === 'pv-plugin-' + pv.pluginId;
+    } catch (e) { return false; }
+  })();
+
+  // ---------- 账号清单:读 / 写 / 迁移(单写者=面板实例) ----------
+
+  /** 读账号清单(纠偏保序);缺失/为空返回 [](球实例空清单时走 fallback 视图) */
+  function readAccounts() {
+    return pv.storage.get(KV_ACCOUNTS).then(function (value) {
+      return sanitizeAccounts(value);
+    }).catch(function () { return []; });
+  }
+
+  function writeAccounts(list) {
+    return pv.storage.set(KV_ACCOUNTS, list).catch(function (err) {
+      throw new Error(tm('credFail') + ((err && err.message) || String(err)));
+    });
+  }
+
+  /**
+   * 迁移(首启动):tm.accounts 缺失/为空 → 探测各 provider 的 legacy 配置态
+   * (桥 configured() 无参,等价逐 provider configured('provider'),命中新旧任一)
+   * → 命中者建 {provider, label:"default"} 入清单。幂等:仅命中才落盘,已有清单
+   * 原样返回。仅面板实例调用(清单单写者);球实例只读,空清单走 fallback 视图。
+   */
+  function ensureAccountsMigrated() {
+    if (IS_BALL_WINDOW) return readAccounts();
+    return readAccounts().then(function (list) {
+      if (list.length > 0) return list;
+      return Promise.resolve(pv.credentials.configured()).then(function (configuredList) {
+        var migrated = (Array.isArray(configuredList) ? configuredList : [])
+          .filter(function (p) { return !!PROVIDERS[p]; })
+          .map(function (p) { return { provider: p, label: 'default' }; });
+        if (migrated.length === 0) return [];
+        return writeAccounts(migrated).then(function () { return migrated; });
+      }).catch(function () { return []; });
+    });
+  }
+
+  /** 逐账号探测已配置态(并行),返回配置齐全的账号子序列(保清单序) */
+  function probeConfiguredAccounts(accounts) {
+    return Promise.all(accounts.map(function (account) {
+      return Promise.resolve(pv.credentials.configured(accountScope(account)))
+        .then(function (ok) { return ok === true ? account : null; })
+        .catch(function () { return null; });
+    })).then(function (results) {
+      return results.filter(function (a) { return a !== null; });
+    });
+  }
+
+  /**
+   * 球实例的账号视图:清单非空 → 逐账号探测过滤;空清单(未迁移)→ legacy
+   * fallback 视图 —— configured() 无参探测已配置 provider,映射为 default 账号
+   * (与迁移产出一致,内存态不写 kv,保持清单单写者=面板实例)。
+   */
+  function loadBallAccounts() {
+    return readAccounts().then(function (list) {
+      if (list.length > 0) return probeConfiguredAccounts(list);
+      return Promise.resolve(pv.credentials.configured()).then(function (configuredList) {
+        return (Array.isArray(configuredList) ? configuredList : [])
+          .filter(function (p) { return !!PROVIDERS[p]; })
+          .map(function (p) { return { provider: p, label: 'default' }; });
+      }).catch(function () { return []; });
+    });
   }
 
   // ---------- 样式:一次性注入(类前缀 pv-tm-,颜色全部走宿主 CSS token) ----------
@@ -490,6 +645,7 @@
         'background:transparent;border:none;padding:0;cursor:pointer;display:block;}',
       '.pv-tm-ball svg{display:block;}',
       '.pv-tm-abbr{font-size:15px;font-weight:600;fill:var(--text);}',
+      '.pv-tm-intl{font-size:9px;fill:var(--muted);}',
       '.pv-tm-pct{font-size:11px;fill:var(--text);}',
       '.pv-tm-pct.err{fill:var(--danger);font-weight:700;}',
       '.pv-tm-pct.empty{fill:var(--muted);}',
@@ -502,32 +658,49 @@
         'white-space:nowrap;}',
       '.pv-tm-menu-item:hover{background:var(--panel-hover);}',
       '.pv-tm-menu-item .pv-tm-check{color:var(--accent);font-weight:700;}',
+      '.pv-tm-menu-head{padding:5px 10px 2px;font-size:11px;font-weight:600;color:var(--muted);}',
       '.pv-tm-menu-sep{height:1px;background:var(--border);margin:4px 6px;}',
       '.pv-tm-panel{display:flex;flex-direction:column;gap:12px;max-width:560px;}',
       '.pv-tm-cards{display:flex;flex-direction:column;gap:8px;}',
+      '.pv-tm-cards-head{display:flex;justify-content:flex-end;}',
       '.pv-tm-card{border:1px solid var(--border);border-radius:8px;padding:10px 12px;',
         'display:flex;flex-direction:column;gap:6px;background:var(--panel);}',
-      '.pv-tm-card-head{display:flex;align-items:center;justify-content:space-between;}',
+      '.pv-tm-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}',
+      '.pv-tm-card-titlewrap{display:flex;flex-direction:column;gap:2px;min-width:0;}',
       '.pv-tm-card-title{font-size:13px;font-weight:600;color:var(--text);}',
+      '.pv-tm-card-sub{font-size:11px;color:var(--muted);white-space:nowrap;',
+        'overflow:hidden;text-overflow:ellipsis;}',
       '.pv-tm-row{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted);}',
       '.pv-tm-row .pv-tm-val{color:var(--text);}',
       '.pv-tm-val.danger{color:var(--danger);font-weight:600;}',
       '.pv-tm-card-error{color:var(--danger);font-size:12px;}',
       '.pv-tm-muted{color:var(--muted);font-size:12px;}',
+      '.pv-tm-badge{display:inline-block;padding:1px 8px;border:1px solid var(--border);',
+        'border-radius:999px;font-size:11px;color:var(--muted);white-space:nowrap;}',
+      '.pv-tm-badge.ok{color:var(--accent);border-color:var(--accent);}',
       '.pv-tm-settings{border-top:1px solid var(--border);padding-top:10px;',
         'display:flex;flex-direction:column;gap:8px;}',
       '.pv-tm-set-row{display:flex;align-items:center;gap:8px;font-size:12px;}',
-      '.pv-tm-set-label{min-width:72px;color:var(--muted);white-space:nowrap;}'
+      '.pv-tm-set-label{min-width:72px;color:var(--muted);white-space:nowrap;}',
+      '.pv-tm-acct-row{display:flex;align-items:center;gap:8px;font-size:12px;}',
+      '.pv-tm-acct-row .pv-tm-acct-label{color:var(--text);min-width:0;',
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+      '.pv-tm-acct-row .pv-tm-badge{margin-left:auto;}',
+      '.pv-tm-add-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}',
+      '.pv-tm-add-row .input{flex:1 1 120px;min-width:96px;}',
+      '.pv-tm-add-row .input.pv-tm-key-input{flex:2 1 150px;}',
+      '.pv-tm-add-status{color:var(--muted);font-size:12px;min-height:1em;}',
+      '.pv-tm-add-status.err{color:var(--danger);}'
     ].join('');
     document.head.appendChild(style);
   }
 
   // ---------- 球体(pv.window.setup;仅球窗实例的 onMount 会执行) ----------
 
-  var ballProvider = null;   // 当前供应商
-  var ballData = null;       // 当前供应商最近一次成功数据(cache 或本次拉取)
+  var ballAccount = null;    // 当前账号 scope('provider:label')
+  var ballData = null;       // 当前账号最近一次成功数据(cache 或本次拉取)
   var ballError = null;      // 最近一次取数错误摘要
-  var ballNoConfigured = false; // 无已配置供应商的灰态
+  var ballNoConfigured = false; // 无已配置账号的灰态
   var pollTimer = null;      // 球实例持有;面板实例不轮询
   var pollPeriodMs = 0;
 
@@ -574,7 +747,7 @@
     ball.addEventListener('mouseup', function () {
       var wasClick = dragState !== null && !dragState.moved;
       dragState = null;
-      if (wasClick) rotateProvider();
+      if (wasClick) rotateAccount();
     });
     wrap.appendChild(ball);
     var menu = tmEl('div', 'pv-tm-menu');
@@ -586,19 +759,20 @@
     window.addEventListener('blur', function () { closeTmMenu(wrap); });
 
     renderBall();
-    // 启动序列:读当前供应商 → 渲染上次成功 cache → 拉一次新数据 → 轮询
-    pv.storage.get(KV_PROVIDER).then(function (saved) {
-      return pv.credentials.configured().then(function (list) {
-        var configuredList = Array.isArray(list) ? list : [];
-        if (configuredList.length === 0) {
-          ballNoConfigured = true;
-          renderBall();
-          return;
-        }
-        ballNoConfigured = false;
-        ballProvider = configuredList.indexOf(saved) >= 0 ? saved : configuredList[0];
+    // 启动序列:取账号视图(清单或 fallback)→ 升级旧 selection → 渲染上次成功
+    // cache → 拉一次新数据 → 轮询
+    loadBallAccounts().then(function (accounts) {
+      if (accounts.length === 0) {
+        ballNoConfigured = true;
         renderBall();
-        return readCache(ballProvider).then(function (cached) {
+        return null;
+      }
+      return pv.storage.get(KV_PROVIDER).then(function (saved) {
+        var selection = upgradeSelection(saved);
+        var ids = accounts.map(function (a) { return accountScope(a); });
+        ballAccount = ids.indexOf(selection) >= 0 ? selection : ids[0];
+        renderBall();
+        return readCache(accountOf(ballAccount, accounts)).then(function (cached) {
           if (cached) {
             ballData = cached;
             renderBall();
@@ -615,19 +789,30 @@
     });
   }
 
-  /** 球体渲染:圆环 = 5h 百分比;环底 --border、进度 --accent(≥80% --danger)、
-   *  中心 abbr + 百分比;失败态环保留最近缓存值 + 中心「!」,tooltip 错误摘要 */
+  /** 由 scope 在账号视图里找回账号对象;找不到(null selection 等)回退首个 */
+  function accountOf(scope, accounts) {
+    for (var i = 0; i < accounts.length; i++) {
+      if (accountScope(accounts[i]) === scope) return accounts[i];
+    }
+    return accounts[0] || null;
+  }
+
+  /** 球体渲染:圆环 = 当前账号 5h 百分比;环底 --border、进度 --accent(≥80% --danger)、
+   *  中心 abbr(国际角标 i)+ 百分比;失败态环保留最近缓存值 + 中心「!」,
+   *  tooltip 错误摘要 */
   function renderBall() {
     var wrap = document.querySelector('.pv-tm-wrap');
     if (!wrap) return;
     var ball = wrap.querySelector('.pv-tm-ball');
     if (!ball) return;
-    var meta = ballProvider ? window.pvTokenMonitor.meta[ballProvider] : null;
+    var account = ballAccount ? parseScope(ballAccount) : null;
+    var meta = account ? PROVIDERS[account.provider] : null;
     var pct = ballData && ballData.fiveHour ? ballData.fiveHour.percent : null;
     var ring = 201.06; // 2πr(r=32)
     var offset = pct === null ? ring : ring * (1 - Math.min(100, Math.max(0, pct)) / 100);
     var stroke = pct !== null && pct >= 80 ? 'var(--danger)' : 'var(--accent)';
     var abbr = meta ? meta.abbr : '—';
+    var intl = meta && meta.intl ? '<tspan class="pv-tm-intl" dy="-4">i</tspan>' : '';
     var pctClass = ballError ? 'pv-tm-pct err' : (pct === null ? 'pv-tm-pct empty' : 'pv-tm-pct');
     var center2 = ballError ? '!' : (pct === null ? '–' : (Math.round(pct * 100) / 100) + '%');
     ball.innerHTML =
@@ -635,18 +820,26 @@
       '<circle cx="38" cy="38" r="32" fill="none" stroke="var(--border)" stroke-width="6"/>' +
       '<circle class="pv-tm-ring" cx="38" cy="38" r="32" fill="none" stroke="' + stroke + '" stroke-width="6" ' +
       'stroke-linecap="round" stroke-dasharray="' + ring + '" stroke-dashoffset="' + offset + '" transform="rotate(-90 38 38)"/>' +
-      '<text class="pv-tm-abbr" x="38" y="36" text-anchor="middle">' + abbr + '</text>' +
+      '<text class="pv-tm-abbr" x="38" y="36" text-anchor="middle">' + abbr + intl + '</text>' +
       '<text class="' + pctClass + '" x="38" y="51" text-anchor="middle">' + center2 + '</text>' +
       '</svg>';
     ball.title = buildBallTooltip();
   }
 
-  /** tooltip:5h% / 周% / 距重置倒计时;失败附错误摘要;空态提示录入 Key */
+  /** scope 字符串 → 账号对象(球内部状态用;仅信任内部构造的 'provider:label') */
+  function parseScope(scope) {
+    var idx = scope.indexOf(':');
+    if (idx <= 0 || idx === scope.length - 1) return null;
+    return { provider: scope.slice(0, idx), label: scope.slice(idx + 1) };
+  }
+
+  /** tooltip:供应商+label / 5h% / 周% / 距重置倒计时;失败附错误摘要;空态提示添加账号 */
   function buildBallTooltip() {
     if (ballNoConfigured) return tm('ballEmpty');
-    if (!ballProvider) return tm('ballEmpty');
-    var meta = window.pvTokenMonitor.meta[ballProvider];
-    var lines = [meta ? meta.label : ballProvider];
+    if (!ballAccount) return tm('ballEmpty');
+    var account = parseScope(ballAccount);
+    var meta = account ? PROVIDERS[account.provider] : null;
+    var lines = [meta ? meta.label + ' · ' + account.label : ballAccount];
     if (ballData) {
       var five = ballData.fiveHour || {};
       var week = ballData.weekly || {};
@@ -665,35 +858,37 @@
     return lines.join('\n');
   }
 
-  /** 左键:在已配置供应商间轮换并立即取数(每次现读 configured,保持新鲜) */
-  function rotateProvider() {
-    pv.credentials.configured().then(function (list) {
-      var configuredList = Array.isArray(list) ? list : [];
-      if (configuredList.length === 0) {
+  /** 左键:在全部已配置账号间轮换并立即取数(每次现读账号视图,保持新鲜;
+   *  当前不在序列(如已被面板删除)时从首个账号重新开始) */
+  function rotateAccount() {
+    loadBallAccounts().then(function (accounts) {
+      if (accounts.length === 0) {
         ballNoConfigured = true;
-        ballProvider = null;
+        ballAccount = null;
         ballData = null;
         ballError = null;
         renderBall();
         return;
       }
-      var idx = configuredList.indexOf(ballProvider);
-      setProvider(configuredList[(idx + 1) % configuredList.length]);
+      var ids = accounts.map(function (a) { return accountScope(a); });
+      var idx = ids.indexOf(ballAccount);
+      setAccount(ids[(idx + 1) % ids.length], accounts);
     }).catch(function (err) {
       ballError = (err && err.message) || String(err);
       renderBall();
     });
   }
 
-  /** 切换供应商:复位状态 → 持久化 → 渲染缓存 → 拉新数据 */
-  function setProvider(provider) {
+  /** 切换账号:复位状态 → 持久化('provider:label')→ 渲染缓存 → 拉新数据 */
+  function setAccount(scope, accounts) {
+    var account = accountOf(scope, accounts || [parseScope(scope)].filter(Boolean));
     ballNoConfigured = false;
-    ballProvider = provider;
+    ballAccount = accountScope(account);
     ballData = null;
     ballError = null;
     renderBall();
-    pv.storage.set(KV_PROVIDER, provider).catch(function () {});
-    var proceed = readCache(provider).then(function (cached) {
+    pv.storage.set(KV_PROVIDER, ballAccount).catch(function () {});
+    var proceed = readCache(account).then(function (cached) {
       if (cached) {
         ballData = cached;
         renderBall();
@@ -703,10 +898,12 @@
     void proceed;
   }
 
-  /** 拉当前供应商数据并渲染;失败:环保留缓存值 + 中心「!」+ tooltip 错误 */
+  /** 拉当前账号数据并渲染;失败:环保留缓存值 + 中心「!」+ tooltip 错误 */
   function refreshBallData() {
-    if (!ballProvider) return Promise.resolve();
-    return fetchAndCache(ballProvider).then(function (data) {
+    if (!ballAccount) return Promise.resolve();
+    var account = parseScope(ballAccount);
+    if (!account) return Promise.resolve();
+    return fetchAndCache(account).then(function (data) {
       ballData = data;
       ballError = null;
       renderBall();
@@ -717,7 +914,8 @@
   }
 
   /** 轮询生命周期(§5.2):球实例持有 —— mount 且 ball.poll.enabled 即启;
-   *  每 tick 重读配置(面板改配置无需重开窗口),停用即自停,间隔变更重启 */
+   *  每 tick 重读配置与账号视图(面板增删账号经 kv 同步,删除当前账号即切下一个),
+   *  停用即自停,间隔变更重启 */
   function startPollIfEnabled() {
     stopPoll();
     pv.storage.get(KV_POLL).then(function (cfg) {
@@ -734,10 +932,34 @@
             startPollIfEnabled(); // 间隔变更:重启计时器
             return;
           }
-          refreshBallData();
+          tickBall();
         }).catch(function () { stopPoll(); });
       }, pollPeriodMs);
     }).catch(function () { /* 配置读取失败:保持手动模式 */ });
+  }
+
+  /** tick:重读账号视图同步清单(删除/失效账号自动让位),再刷新当前账号;
+   *  单序列不重叠(interval ≥120s,单次取数整体超时 15s) */
+  function tickBall() {
+    loadBallAccounts().then(function (accounts) {
+      if (accounts.length === 0) {
+        ballNoConfigured = true;
+        ballAccount = null;
+        ballData = null;
+        ballError = null;
+        renderBall();
+        return;
+      }
+      var ids = accounts.map(function (a) { return accountScope(a); });
+      if (ids.indexOf(ballAccount) < 0) {
+        setAccount(ids[0], accounts); // 当前账号已被删除/失效:切到清单首个
+        return;
+      }
+      refreshBallData();
+    }).catch(function (err) {
+      ballError = (err && err.message) || String(err);
+      renderBall();
+    });
   }
 
   function stopPoll() {
@@ -750,9 +972,9 @@
 
   // ---------- 右键菜单(自注入样式见 ensureTmStyles;失焦即收起) ----------
 
-  /** 菜单展开需扩窗:84×84 窗口装不下 6 项菜单(webview 内容裁剪),
+  /** 菜单展开需扩窗:84×84 窗口装不下多组账号菜单(webview 内容裁剪),
    *  经 pv.window.resize 临时扩窗,收起恢复 84×84(实现决策,见开工卡偏差)。
-   *  注意:菜单项经 configured() 异步填充,必须等填充完成再测高,
+   *  注意:菜单项经账号视图异步填充,必须等填充完成再测高,
    *  否则按空菜单(≈10px)扩窗会把大部分条目裁在窗口外(冒烟实测) */
   function openTmMenu(wrap) {
     var menu = wrap.querySelector('.pv-tm-menu');
@@ -771,26 +993,34 @@
     void pv.window.resize(BALL_SIZE, BALL_SIZE).catch(function () {});
   }
 
-  /** 菜单内容:直选供应商(✓ 当前)+ 立即刷新 + 打开详情面板 + 隐藏;
-   *  返回填充完成 Promise(供扩窗前测量) */
+  /** 菜单内容:直选账号(按供应商分组列账号,显示 label,✓ 当前)+ 立即刷新 +
+   *  打开详情面板 + 隐藏;返回填充完成 Promise(供扩窗前测量) */
   function buildTmMenu(menu) {
     menu.innerHTML = '';
-    return pv.credentials.configured().then(function (list) {
-      var configuredList = Array.isArray(list) ? list : [];
-      for (var i = 0; i < configuredList.length; i++) {
-        (function (p) {
-          var meta = window.pvTokenMonitor.meta[p];
-          var item = tmEl('div', 'pv-tm-menu-item');
-          item.appendChild(tmEl('span', null, meta ? meta.label : p));
-          if (p === ballProvider) item.appendChild(tmEl('span', 'pv-tm-check', '✓'));
-          item.addEventListener('click', function () {
-            closeTmMenu();
-            setProvider(p);
-          });
-          menu.appendChild(item);
-        })(configuredList[i]);
+    return loadBallAccounts().then(function (accounts) {
+      for (var i = 0; i < PROVIDER_ORDER.length; i++) {
+        (function (providerKey) {
+          var group = accounts.filter(function (a) { return a.provider === providerKey; });
+          if (group.length === 0) return;
+          var meta = PROVIDERS[providerKey];
+          menu.appendChild(tmEl('div', 'pv-tm-menu-head', meta ? meta.label : providerKey));
+          for (var j = 0; j < group.length; j++) {
+            (function (account) {
+              var item = tmEl('div', 'pv-tm-menu-item');
+              item.appendChild(tmEl('span', null, account.label));
+              if (accountScope(account) === ballAccount) {
+                item.appendChild(tmEl('span', 'pv-tm-check', '✓'));
+              }
+              item.addEventListener('click', function () {
+                closeTmMenu();
+                setAccount(accountScope(account), accounts);
+              });
+              menu.appendChild(item);
+            })(group[j]);
+          }
+        })(PROVIDER_ORDER[i]);
       }
-      if (configuredList.length > 0) menu.appendChild(tmEl('div', 'pv-tm-menu-sep'));
+      if (accounts.length > 0) menu.appendChild(tmEl('div', 'pv-tm-menu-sep'));
       var refresh = tmEl('div', 'pv-tm-menu-item', tm('refreshNow'));
       refresh.addEventListener('click', function () {
         closeTmMenu();
@@ -825,107 +1055,92 @@
       el.innerHTML = '';
       var root = tmEl('div', 'pv-tm-panel');
 
-      // 卡片区(每家已配置供应商一张卡)
-      var cards = tmEl('div', 'pv-tm-cards');
-      root.appendChild(cards);
-
-      // 设置区:Key 录入(3 家固定)+ 轮询设置
+      // 设置区:添加账号 + 账号列表 + 轮询设置(卡片在其上)
       var settings = tmEl('div', 'pv-tm-settings');
-      var panelErrors = {}; // provider → 最近一次取数错误(不覆盖 cache)
+      var panelErrors = {}; // 账号 scope → 最近一次取数错误(不覆盖该账号 cache)
 
-      var PROVIDER_ORDER = ['glm', 'volcengine', 'opencode'];
-      for (var i = 0; i < PROVIDER_ORDER.length; i++) {
-        (function (p) {
-          var meta = window.pvTokenMonitor.meta[p];
-          var row = tmEl('div', 'pv-tm-set-row');
-          row.appendChild(tmEl('span', 'pv-tm-set-label', meta ? meta.label : p));
-          var input = document.createElement('input');
-          input.className = 'input';
-          input.type = 'password';
-          input.placeholder = tm('keyPlaceholder');
-          input.autocomplete = 'off';
-          var saveBtn = tmEl('button', 'btn small', tm('saveKey'));
-          var delBtn = tmEl('button', 'btn small', tm('removeKey'));
-          var status = tmEl('span', 'pv-tm-muted');
-          row.appendChild(input);
-          row.appendChild(saveBtn);
-          row.appendChild(delBtn);
-          row.appendChild(status);
-          settings.appendChild(row);
-
-          // 国际版开关(GLM:api.z.ai;火山:bytepluses.com;存 kv,取数现读)
-          var globalKv = p === 'glm' ? KV_GLM_GLOBAL : (p === 'volcengine' ? KV_VOLC_GLOBAL : null);
-          if (globalKv) {
-            var gRow = tmEl('div', 'pv-tm-set-row');
-            gRow.appendChild(tmEl('span', 'pv-tm-set-label', ''));
-            var gCheck = document.createElement('input');
-            gCheck.type = 'checkbox';
-            gCheck.title = tm('glmGlobalTitle');
-            gRow.appendChild(gCheck);
-            gRow.appendChild(tmEl('span', 'pv-tm-muted', tm(p === 'glm' ? 'glmGlobal' : 'volcGlobal')));
-            settings.appendChild(gRow);
-            pv.storage.get(globalKv).then(function (v) {
-              gCheck.checked = v === true;
-            }).catch(function () { /* 默认国内 */ });
-            gCheck.addEventListener('change', function () {
-              void pv.storage.set(globalKv, gCheck.checked === true).catch(function () {});
-              // 切换 base 后立即重取该家(未录入 Key 时仅落盘,数据随录入即刷)
-              fetchAndCache(p).then(function () {
-                renderPanelCards();
-              }).catch(function (err) {
-                panelErrors[p] = (err && err.message) || String(err);
-                renderPanelCards();
-              });
-            });
-          }
-
-          var refreshStatus = function (configuredList) {
-            var has = configuredList.indexOf(p) >= 0;
-            status.textContent = has ? tm('configured') : tm('notConfigured');
-            input.disabled = false;
-            delBtn.disabled = !has;
-            delBtn.style.visibility = has ? 'visible' : 'hidden';
-          };
-
-          saveBtn.addEventListener('click', function () {
-            var secret = input.value;
-            if (secret === '') return;
-            pv.credentials.set(p, secret).then(function () {
-              input.value = '';
-              return pv.credentials.configured().then(function (list) {
-                refreshStatus(list);
-                renderPanelCards();
-                // 录入即刷:成功后立即拉取该家数据并写 cache(失败错误落卡片,不清缓存)
-                fetchAndCache(p).then(function () {
-                  renderPanelCards();
-                }).catch(function (err) {
-                  panelErrors[p] = (err && err.message) || String(err);
-                  renderPanelCards();
-                });
-              });
-            }).catch(function (err) {
-              status.textContent = tm('credFail') + ((err && err.message) || String(err));
-            });
-          });
-          delBtn.addEventListener('click', function () {
-            pv.credentials.delete(p).then(function () {
-              return pv.credentials.configured().then(function (list) {
-                refreshStatus(list);
-                renderPanelCards();
-              });
-            }).catch(function (err) {
-              status.textContent = tm('credFail') + ((err && err.message) || String(err));
-            });
-          });
-
-          // 初始状态经 configured() 现读(面板实例与球实例的 kv/凭据共享)
-          pv.credentials.configured().then(refreshStatus).catch(function () {
-            status.textContent = tm('notConfigured');
-          });
-        })(PROVIDER_ORDER[i]);
+      // ---- 添加行:供应商下拉(含国内/国际变体)+ 标签 + Key + 添加 ----
+      var addTitle = tmEl('div', 'pv-tm-set-label', tm('addAccount'));
+      settings.appendChild(addTitle);
+      var addRow = tmEl('div', 'pv-tm-add-row');
+      var providerSelect = document.createElement('select');
+      providerSelect.className = 'input';
+      for (var pi = 0; pi < PROVIDER_ORDER.length; pi++) {
+        var opt = document.createElement('option');
+        opt.value = PROVIDER_ORDER[pi];
+        opt.textContent = PROVIDERS[PROVIDER_ORDER[pi]].label;
+        providerSelect.appendChild(opt);
       }
+      var labelInput = document.createElement('input');
+      labelInput.className = 'input';
+      labelInput.type = 'text';
+      labelInput.placeholder = tm('labelPh');
+      labelInput.autocomplete = 'off';
+      var keyInput = document.createElement('input');
+      keyInput.className = 'input pv-tm-key-input';
+      keyInput.type = 'password';
+      keyInput.placeholder = tm('keyPlaceholder');
+      keyInput.autocomplete = 'off';
+      var addBtn = tmEl('button', 'btn small', tm('addBtn'));
+      addRow.appendChild(providerSelect);
+      addRow.appendChild(labelInput);
+      addRow.appendChild(keyInput);
+      addRow.appendChild(addBtn);
+      settings.appendChild(addRow);
+      var addStatus = tmEl('div', 'pv-tm-add-status');
+      settings.appendChild(addStatus);
 
-      // 轮询设置行:开关 + 间隔(钳制 ≥120s;默认关;存 ball.poll)
+      /** 添加行状态提示(校验错误 danger;成功 muted) */
+      var showAddStatus = function (text, isErr) {
+        addStatus.textContent = text || '';
+        addStatus.className = 'pv-tm-add-status' + (isErr ? ' err' : '');
+      };
+
+      addBtn.addEventListener('click', function () {
+        var provider = providerSelect.value;
+        var label = labelInput.value.trim();
+        var secret = keyInput.value;
+        if (!PROVIDERS[provider]) { showAddStatus(tm('providerPh'), true); return; }
+        if (!isValidLabel(label)) { showAddStatus(tm('labelInvalid'), true); return; }
+        if (secret === '') { showAddStatus(tm('keyRequired'), true); return; }
+        ensureAccountsMigrated().then(function (accounts) {
+          var scope = provider + ':' + label;
+          for (var i = 0; i < accounts.length; i++) {
+            if (accountScope(accounts[i]) === scope) {
+              showAddStatus(tm('labelDuplicate'), true);
+              return null;
+            }
+          }
+          // 先写凭据再入册:录入即刷该账号(失败错误落卡片,不清缓存)
+          return pv.credentials.set(scope, secret).then(function () {
+            var next = accounts.concat([{ provider: provider, label: label }]);
+            return writeAccounts(next).then(function () {
+              labelInput.value = '';
+              keyInput.value = '';
+              showAddStatus(tm('addOk'), false);
+              return fetchAndCache({ provider: provider, label: label })
+                .catch(function (err) {
+                  panelErrors[scope] = (err && err.message) || String(err);
+                })
+                .then(function () {
+                  rerender();
+                });
+            });
+          }).catch(function (err) {
+            showAddStatus(tm('credFail') + ((err && err.message) || String(err)), true);
+          });
+        }).catch(function (err) {
+          showAddStatus(tm('credFail') + ((err && err.message) || String(err)), true);
+        });
+      });
+
+      // ---- 账号列表行:[供应商+端点徽标 | label | 已配置徽标 | 删除] ----
+      var listTitle = tmEl('div', 'pv-tm-set-label', tm('accountList'));
+      settings.appendChild(listTitle);
+      var acctList = tmEl('div', 'pv-tm-acct-list');
+      settings.appendChild(acctList);
+
+      // ---- 轮询设置行:开关 + 间隔(钳制 ≥120s;默认关;存 ball.poll) ----
       var pollRow = tmEl('div', 'pv-tm-set-row');
       pollRow.appendChild(tmEl('span', 'pv-tm-set-label', tm('pollLabel')));
       var pollCheck = document.createElement('input');
@@ -962,21 +1177,116 @@
       }).catch(function () {});
 
       root.appendChild(settings);
+
+      // ---- 卡片区:每账号一张卡 + 「全部刷新」(卡片在上、设置区在下,沿用原层级) ----
+      var cardsHead = tmEl('div', 'pv-tm-cards-head');
+      var refreshAllBtn = tmEl('button', 'btn small', tm('refreshAll'));
+      refreshAllBtn.addEventListener('click', function () {
+        refreshAllBtn.disabled = true;
+        ensureAccountsMigrated().then(function (accounts) {
+          return Promise.all(accounts.map(function (account) {
+            var scope = accountScope(account);
+            return fetchAndCache(account)
+              .then(function () { panelErrors[scope] = null; })
+              .catch(function (err) {
+                panelErrors[scope] = (err && err.message) || String(err);
+              });
+          }));
+        }).then(function () {
+          rerender();
+        }).catch(function () {
+          rerender();
+        });
+      });
+      cardsHead.appendChild(refreshAllBtn);
+
+      var cards = tmEl('div', 'pv-tm-cards');
+      el.appendChild(cardsHead);
+      el.appendChild(cards);
       el.appendChild(root);
 
-      /** 渲染卡片区:每家已配置供应商一张卡;数据渲染 cache:<provider> */
-      function renderPanelCards() {
-        pv.credentials.configured().then(function (list) {
-          cards.innerHTML = '';
-          var configuredList = Array.isArray(list) ? list : [];
-          if (configuredList.length === 0) {
-            cards.appendChild(tmEl('div', 'pv-tm-muted', tm('ballEmpty')));
+      /** 整区重渲染(账号列表 + 卡片;addStatus 保持) */
+      function rerender() {
+        renderAccountList();
+        renderPanelCards();
+      }
+
+      /** 账号列表:逐行 [供应商+端点徽标 | label | 已配置徽标 | 删除];
+       *  删除 = credentials.delete + 清该账号 cache + 清单移除(球经 kv 同步跟随) */
+      function renderAccountList() {
+        ensureAccountsMigrated().then(function (accounts) {
+          acctList.innerHTML = '';
+          if (accounts.length === 0) {
+            acctList.appendChild(tmEl('div', 'pv-tm-muted', tm('panelEmpty')));
             return;
           }
-          var reads = configuredList.map(function (p) { return readCache(p); });
+          var probes = accounts.map(function (account) {
+            return Promise.resolve(pv.credentials.configured(accountScope(account)))
+              .then(function (ok) { return ok === true; })
+              .catch(function () { return false; });
+          });
+          Promise.all(probes).then(function (states) {
+            acctList.innerHTML = '';
+            for (var i = 0; i < accounts.length; i++) {
+              acctList.appendChild(buildAccountRow(accounts[i], states[i]));
+            }
+          });
+        }).catch(function (err) {
+          acctList.innerHTML = '';
+          acctList.appendChild(tmEl('div', 'pv-tm-card-error', (err && err.message) || String(err)));
+        });
+      }
+
+      function buildAccountRow(account, configuredOk) {
+        var meta = PROVIDERS[account.provider];
+        var row = tmEl('div', 'pv-tm-acct-row');
+        var scope = accountScope(account);
+        var badge = tmEl('span', 'pv-tm-badge', meta ? meta.label : account.provider);
+        badge.title = meta ? meta.endpoint : account.provider;
+        row.appendChild(badge);
+        row.appendChild(tmEl('span', 'pv-tm-acct-label', account.label));
+        row.appendChild(tmEl('span', 'pv-tm-badge' + (configuredOk ? ' ok' : ''),
+          configuredOk ? tm('configured') : tm('notConfigured')));
+        var delBtn = tmEl('button', 'btn small', tm('removeAccount'));
+        delBtn.addEventListener('click', function () {
+          delBtn.disabled = true;
+          pv.credentials.delete(scope).then(function () {
+            // 清该账号 cache(置 null:kv 无删除命令,读侧 null 即无数据)
+            return pv.storage.set(KV_CACHE_PREFIX + scope, null);
+          }).then(function () {
+            return ensureAccountsMigrated().then(function (accounts2) {
+              var next = accounts2.filter(function (a) {
+                return accountScope(a) !== scope;
+              });
+              return writeAccounts(next);
+            });
+          }).then(function () {
+            rerender();
+          }).catch(function (err) {
+            delBtn.disabled = false;
+            showAddStatus(tm('credFail') + ((err && err.message) || String(err)), true);
+          });
+        });
+        row.appendChild(delBtn);
+        return row;
+      }
+
+      /** 渲染卡片区:每账号一张卡(含未配置账号,徽标在列表区);数据渲染该账号 cache */
+      function renderPanelCards() {
+        ensureAccountsMigrated().then(function (accounts) {
+          cards.innerHTML = '';
+          if (accounts.length === 0) {
+            cards.appendChild(tmEl('div', 'pv-tm-muted', tm('panelEmpty')));
+            refreshAllBtn.disabled = true;
+            return;
+          }
+          refreshAllBtn.disabled = false;
+          var reads = accounts.map(function (account) { return readCache(account); });
           Promise.all(reads).then(function (results) {
-            for (var i = 0; i < configuredList.length; i++) {
-              cards.appendChild(buildCard(configuredList[i], results[i], panelErrors[configuredList[i]] || null));
+            cards.innerHTML = '';
+            for (var i = 0; i < accounts.length; i++) {
+              var scope = accountScope(accounts[i]);
+              cards.appendChild(buildCard(accounts[i], results[i], panelErrors[scope] || null));
             }
           });
         }).catch(function (err) {
@@ -985,20 +1295,25 @@
         });
       }
 
-      /** 单张卡:5h(百分比+倒计时)/ 周 / 24h 聚合(GLM)/ MCP 月度(GLM) */
-      function buildCard(provider, data, errorText) {
-        var meta = window.pvTokenMonitor.meta[provider];
+      /** 单张卡:标题=供应商名+label,副标题=端点;5h(百分比+倒计时)/ 周 /
+       *  24h 聚合(GLM 系)/ MCP 月度(GLM 系) */
+      function buildCard(account, data, errorText) {
+        var meta = PROVIDERS[account.provider];
         var card = tmEl('div', 'pv-tm-card');
         var head = tmEl('div', 'pv-tm-card-head');
-        head.appendChild(tmEl('div', 'pv-tm-card-title', meta ? meta.label : provider));
+        var titlewrap = tmEl('div', 'pv-tm-card-titlewrap');
+        titlewrap.appendChild(tmEl('div', 'pv-tm-card-title',
+          (meta ? meta.label : account.provider) + ' · ' + account.label));
+        titlewrap.appendChild(tmEl('div', 'pv-tm-card-sub', meta ? meta.endpoint : ''));
+        head.appendChild(titlewrap);
         var refreshBtn = tmEl('button', 'btn small', tm('refreshNow'));
         refreshBtn.addEventListener('click', function () {
           refreshBtn.disabled = true;
-          fetchAndCache(provider).then(function () {
-            panelErrors[provider] = null;
+          fetchAndCache(account).then(function () {
+            panelErrors[accountScope(account)] = null;
             renderPanelCards();
           }).catch(function (err) {
-            panelErrors[provider] = (err && err.message) || String(err);
+            panelErrors[accountScope(account)] = (err && err.message) || String(err);
             renderPanelCards();
           });
         });
@@ -1009,7 +1324,7 @@
         var week = (data && data.weekly) || {};
         card.appendChild(statRow(tm('fiveHour'), five));
         card.appendChild(statRow(tm('weekly'), week));
-        if (provider === 'glm') {
+        if (meta && meta.family === 'glm') {
           var tokens = data && typeof data.tokens24h === 'number' ? data.tokens24h : null;
           var row = tmEl('div', 'pv-tm-row');
           row.appendChild(tmEl('span', null, tm('tokens24h')));
@@ -1040,6 +1355,6 @@
         return row;
       }
 
-      renderPanelCards();
+      rerender();
     }
   });

@@ -12,7 +12,9 @@
     "net:ark.ap-southeast.bytepluses.com",
     "net:opencode.ai",
     "credential:glm",
+    "credential:glm-intl",
     "credential:volcengine",
+    "credential:volcengine-intl",
     "credential:opencode",
     "window:float"
   ]
