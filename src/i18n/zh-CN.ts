@@ -340,6 +340,7 @@ export const zhCN = {
   "ph.providerGitea": "Gitea(自建)",
   "ph.providerTitle": "平台类型;非 GitHub/Gitee/GitLab 官方域名的仓库请手动选择",
   "ph.setActiveSource": "设为生效源(同一时刻仅一个生效)",
+  "ph.deleteSource": "删除此插件源",
   "ph.badSourceUrl": "插件源地址无法解析,应为仓库主页地址",
   "ph.emptySources": "还没有插件源。添加一个仓库主页地址(仓库根需有 pv-plugins.json)。",
   "ph.sourceBranchSuffix": " · 分支 {branch}",
@@ -375,6 +376,7 @@ export const zhCN = {
   "ph.toastOpenWindowFailed": "打开插件窗口失败:{msg}",
   "ph.toastBadRepoUrl": "无法解析仓库地址,请填写仓库主页 URL",
   "ph.toastSourceAdded": "已添加插件源 {name}",
+  "ph.toastSourceDeleted": "已删除插件源「{name}」",
   "ph.toastLoadFailed": "插件加载失败:{msg}",
 
   /* ---- 插件窗口容器(PluginWindow.tsx)---- */

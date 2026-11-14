@@ -365,6 +365,25 @@ export default function PluginHub({
     [mutateState],
   );
 
+  /** 删除插件源:删除的是激活源时切到剩余首个(没有则清空),市场跟随自动重载 */
+  const handleDeleteSource = useCallback(
+    async (id: string) => {
+      const wasActive = state?.activeSourceId === id;
+      const source = state?.sources.find((s) => s.id === id);
+      const next = await mutateState((st) => {
+        st.sources = st.sources.filter((s) => s.id !== id);
+        if (st.activeSourceId === id) {
+          st.activeSourceId = st.sources[0]?.id ?? null;
+        }
+      });
+      if (next && source) {
+        if (wasActive) setMarketForSource(null);
+        showToast(t("ph.toastSourceDeleted", { name: source.name }));
+      }
+    },
+    [state, mutateState, showToast, t],
+  );
+
   /* ---------- MCP Server 固定卡片 ---------- */
 
   /** MCP 开关:落盘后重读为准(不做乐观更新);失败 toast err 并回读复位开关 */
@@ -540,6 +559,20 @@ export default function PluginHub({
                 {s.branch ? t("ph.sourceBranchSuffix", { branch: s.branch }) : ""}
               </div>
             </div>
+            <button
+              type="button"
+              className="ph-row-del"
+              title={t("ph.deleteSource")}
+              aria-label={t("ph.deleteSource")}
+              onClick={(e) => {
+                // 行是 label:点击会转发给 radio 触发激活,preventDefault 阻断
+                e.preventDefault();
+                e.stopPropagation();
+                void handleDeleteSource(s.id);
+              }}
+            >
+              <IconTrash size={14} />
+            </button>
           </label>
         ))
       ) : (

@@ -1864,6 +1864,36 @@ mark.hl {
 
 .ph-row.source {
   cursor: pointer;
+  position: relative;
+  padding-right: 38px;
+}
+
+/* 源行删除按钮:悬停/聚焦显现(行是 label,按钮内已 preventDefault 防误激活) */
+.ph-row-del {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 5px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.ph-row.source:hover .ph-row-del,
+.ph-row-del:focus-visible {
+  opacity: 1;
+}
+
+.ph-row-del:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .ph-row.source:hover {

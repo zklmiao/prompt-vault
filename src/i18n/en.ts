@@ -339,6 +339,7 @@ export const en: Partial<Record<ZhKey, string>> = {
   "ph.providerGitea": "Gitea (self-hosted)",
   "ph.providerTitle": "Platform type; pick manually for repos not on official GitHub/Gitee/GitLab domains",
   "ph.setActiveSource": "Set as the active source (only one is effective at a time)",
+  "ph.deleteSource": "Delete this source",
   "ph.badSourceUrl": "Cannot parse the source URL; expected a repository home URL",
   "ph.emptySources": "No sources yet. Add a repository home URL (repo root must contain pv-plugins.json).",
   "ph.sourceBranchSuffix": " · branch {branch}",
@@ -374,6 +375,7 @@ export const en: Partial<Record<ZhKey, string>> = {
   "ph.toastOpenWindowFailed": "Failed to open plugin window: {msg}",
   "ph.toastBadRepoUrl": "Cannot parse the repository URL; fill in a repository home URL",
   "ph.toastSourceAdded": "Added source {name}",
+  "ph.toastSourceDeleted": "Source deleted: {name}",
   "ph.toastLoadFailed": "Plugin load failed: {msg}",
 
   /* ---- plugin window ---- */
