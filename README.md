@@ -241,6 +241,7 @@ npx vite --config preview/vite.preview.config.ts
 - 图标源图 `app-icon.png`，修改后 `npx tauri icon app-icon.png` 重新生成全套
 - `preview/` 是开发预览夹具，不参与正式构建(tsconfig 只含 `src`)，默认端口 **4173**
   - `?quickpick=1` 单独预览快速拾取窗口；`?empty=1` 以空数据启动（验证首次引导）
+  - `preview/ball-harness.html` 球窗夹具:以最小 pv 桥驱动真实 `plugins-src/token-monitor/main.js`,走查悬浮球与右键菜单(亮/暗令牌 × 壁纸切换)
 - 待办与路线图见 [`docs/backlog.md`](docs/backlog.md)；协作约定见 [`AGENTS.md`](AGENTS.md)
 
 ---

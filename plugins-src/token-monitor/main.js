@@ -438,6 +438,7 @@
       weekly: '周',
       tokens24h: '24h Token',
       mcpMonthly: 'MCP 月度',
+      resetsIn: '距重置',
       noData: '暂无数据',
       panelEmpty: '尚未配置账号:请在下方添加账号并录入 Key',
       addAccount: '添加账号',
@@ -473,6 +474,7 @@
       weekly: 'Week',
       tokens24h: '24h Tokens',
       mcpMonthly: 'MCP monthly',
+      resetsIn: 'Resets in',
       noData: 'No data yet',
       panelEmpty: 'No account configured: add one below and paste its key',
       addAccount: 'Add account',
@@ -536,6 +538,51 @@
     if (typeof n !== 'number' || !isFinite(n)) return POLL_DEFAULT_SEC;
     return Math.max(POLL_MIN_SEC, Math.round(n));
   }
+
+  /** 去尾零:1.50 → 1.5、1.00 → 1 */
+  function trimNum(x, digits) {
+    return Number(x).toFixed(digits).replace(/\.?0+$/, '');
+  }
+
+  /** token 大数紧凑格式化(界面语言相关):zh 万/亿,en k/M/B;非法返回 null */
+  function formatTokens(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return null;
+    if (TM_LANG === 'en') {
+      if (n >= 1e9) return trimNum(n / 1e9, 2) + 'B';
+      if (n >= 1e6) return trimNum(n / 1e6, 1) + 'M';
+      if (n >= 1e3) return trimNum(n / 1e3, 1) + 'k';
+      return String(Math.round(n));
+    }
+    if (n >= 1e8) return trimNum(n / 1e8, 2) + '亿';
+    if (n >= 1e4) return trimNum(n / 1e4, 1) + '万';
+    return String(Math.round(n));
+  }
+
+  /** 行内线性图标(与宿主 icons.tsx 同形:24 viewBox 1.8px 圆角描边,currentColor) */
+  var ICON_TRASH =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 6h18"/>' +
+    '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>' +
+    '<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
+    '<path d="M10 11v6M14 11v6"/></svg>';
+  var ICON_REFRESH =
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M20 12a8 8 0 1 1-2.3-5.6"/>' +
+    '<path d="M20 3v4h-4"/></svg>';
+  var ICON_WINDOW =
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="4" y="6" width="16" height="12" rx="1.5"/>' +
+    '<path d="M4 10h16"/></svg>';
+  var ICON_HIDE =
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>' +
+    '<path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>' +
+    '<path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>' +
+    '<line x1="2" y1="2" x2="22" y2="22"/></svg>';
 
   /** 拉取并写缓存:成功刷新该账号缓存(带 fetchedAt),失败不覆盖上次成功 cache */
   function fetchAndCache(account) {
@@ -648,57 +695,122 @@
     style.textContent = [
       '.pv-tm-wrap{position:relative;width:100%;height:100%;}',
       '.pv-tm-ball{position:absolute;left:50%;top:4px;width:76px;height:76px;margin-left:-38px;',
-        'background:transparent;border:none;padding:0;cursor:pointer;display:block;}',
+        'background:transparent;border:none;padding:0;cursor:pointer;display:block;',
+        'transition:transform .15s ease;}',
+      '.pv-tm-ball:hover{transform:scale(1.05);}',
+      '.pv-tm-ball:active{transform:scale(0.96);}',
       '.pv-tm-ball svg{display:block;}',
-      '.pv-tm-abbr{font-size:15px;font-weight:600;fill:var(--text);}',
-      '.pv-tm-intl{font-size:9px;fill:var(--muted);}',
-      '.pv-tm-pct{font-size:11px;fill:var(--text);}',
+      // 桌面任意壁纸上可读:文字加 panel 色光晕描边(paint-order 先描后填,字形干净)
+      '.pv-tm-abbr{font-size:15px;font-weight:600;fill:var(--text);',
+        'paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round;}',
+      '.pv-tm-intl{font-size:9px;fill:var(--muted);',
+        'paint-order:stroke;stroke:var(--panel);stroke-width:2.5px;stroke-linejoin:round;}',
+      '.pv-tm-pct{font-size:11px;fill:var(--text);font-variant-numeric:tabular-nums;',
+        'paint-order:stroke;stroke:var(--panel);stroke-width:2.5px;stroke-linejoin:round;}',
       '.pv-tm-pct.err{fill:var(--danger);font-weight:700;}',
       '.pv-tm-pct.empty{fill:var(--muted);}',
       '.pv-tm-ring{transition:stroke-dashoffset .4s ease,stroke .4s ease;}',
+      // 右键菜单:与主窗卡片同族(10px 圆角),动作行带同形小图标,选中账号加粗
       '.pv-tm-menu{position:absolute;left:4px;top:84px;width:172px;z-index:10;',
-        'background:var(--panel);border:1px solid var(--border);border-radius:8px;',
-        'padding:4px;box-shadow:var(--shadow-lg);}',
+        'background:var(--panel);border:1px solid var(--border);border-radius:10px;',
+        'padding:5px;box-shadow:var(--shadow-lg);}',
       '.pv-tm-menu-item{display:flex;justify-content:space-between;align-items:center;gap:12px;',
-        'padding:5px 10px;border-radius:5px;font-size:12px;color:var(--text);cursor:pointer;',
+        'padding:6px 9px;border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;',
         'white-space:nowrap;transition:background .12s ease;}',
       // 悬停高亮走项目「指向项」惯用色 --accent-soft(.row.active/.option:hover 同源):
       // --panel-hover 与菜单底色同族过淡,球窗小字号下不可辨;移出即随 :hover 还原
       '.pv-tm-menu-item:hover{background:var(--accent-soft);}',
       '.pv-tm-menu-item .pv-tm-check{color:var(--accent);font-weight:700;}',
-      '.pv-tm-menu-head{padding:5px 10px 2px;font-size:11px;font-weight:600;color:var(--muted);}',
+      '.pv-tm-menu-item.pv-tm-selected .pv-tm-menu-label{font-weight:600;}',
+      '.pv-tm-menu-label{display:inline-flex;align-items:center;gap:7px;min-width:0;',
+        'overflow:hidden;text-overflow:ellipsis;}',
+      '.pv-tm-menu-icon{display:inline-flex;color:var(--muted);flex-shrink:0;}',
+      '.pv-tm-menu-item:hover .pv-tm-menu-icon{color:var(--accent);}',
+      '.pv-tm-menu-head{padding:5px 9px 3px;font-size:11px;font-weight:600;color:var(--muted);}',
       '.pv-tm-menu-sep{height:1px;background:var(--border);margin:4px 6px;}',
-      '.pv-tm-panel{display:flex;flex-direction:column;gap:12px;max-width:560px;}',
-      '.pv-tm-cards{display:flex;flex-direction:column;gap:8px;}',
+      // 面板:主-分栏仪表布局(账号卡在左,设置栏在右;总宽对齐插件区 880px 节奏;
+      // 窄窗口塌成单列)。max-width 与 .ph-list(860px)同族,避免左满右空失衡
+      '.pv-tm-panel{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;',
+        'max-width:880px;align-items:start;}',
+      '.pv-tm-col{display:flex;flex-direction:column;gap:10px;min-width:0;}',
+      '.pv-tm-side{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;}',
+      '@media (max-width:760px){.pv-tm-panel{grid-template-columns:1fr;}}',
+      '.pv-tm-cards{display:flex;flex-direction:column;gap:10px;}',
       '.pv-tm-cards-head{display:flex;justify-content:flex-end;}',
-      '.pv-tm-card{border:1px solid var(--border);border-radius:8px;padding:10px 12px;',
-        'display:flex;flex-direction:column;gap:6px;background:var(--panel);}',
-      '.pv-tm-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}',
-      '.pv-tm-card-titlewrap{display:flex;flex-direction:column;gap:2px;min-width:0;}',
+      '.pv-tm-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;',
+        'display:flex;flex-direction:column;gap:10px;background:var(--panel);}',
+      '.pv-tm-card-head{display:flex;align-items:center;gap:10px;}',
+      '.pv-tm-abbr-chip{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);',
+        'color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.03em;white-space:nowrap;',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;}',
+      '.pv-tm-abbr-chip sup{font-size:8px;font-weight:600;margin-left:1px;}',
+      '.pv-tm-card-titlewrap{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}',
       '.pv-tm-card-title{font-size:13px;font-weight:600;color:var(--text);}',
       '.pv-tm-card-sub{font-size:11px;color:var(--muted);white-space:nowrap;',
         'overflow:hidden;text-overflow:ellipsis;}',
-      '.pv-tm-row{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted);}',
-      '.pv-tm-row .pv-tm-val{color:var(--text);}',
-      '.pv-tm-val.danger{color:var(--danger);font-weight:600;}',
-      '.pv-tm-card-error{color:var(--danger);font-size:12px;}',
+      // 计量条:track 中性面(--border),fill accent,≥80% 转 danger —— 面板的记忆点
+      '.pv-tm-meter{display:flex;flex-direction:column;gap:5px;}',
+      '.pv-tm-meter-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;}',
+      '.pv-tm-meter-name{color:var(--muted);}',
+      '.pv-tm-meter-val{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}',
+      '.pv-tm-meter-val.danger{color:var(--danger);}',
+      '.pv-tm-meter-track{height:6px;border-radius:999px;background:var(--border);overflow:hidden;}',
+      '.pv-tm-meter-fill{height:100%;border-radius:999px;background:var(--accent);transition:width .3s ease;}',
+      '.pv-tm-meter-fill.danger{background:var(--danger);}',
+      '.pv-tm-meter-sub{font-size:11px;color:var(--muted);}',
+      // 24h 聚合 / MCP 月度双瓦片(GLM 系)
+      '.pv-tm-tiles{display:flex;gap:8px;}',
+      '.pv-tm-tile{flex:1;min-width:0;background:var(--body-bg);border-radius:8px;padding:8px 10px;',
+        'display:flex;flex-direction:column;gap:2px;}',
+      '.pv-tm-tile-label{font-size:11px;color:var(--muted);}',
+      '.pv-tm-tile-value{font-size:13px;font-weight:600;color:var(--text);',
+        'font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+      '.pv-tm-card-error{color:var(--danger);font-size:12px;background:var(--danger-soft);',
+        'border-radius:7px;padding:6px 8px;word-break:break-all;}',
+      '.pv-tm-empty{color:var(--muted);font-size:12px;text-align:center;padding:18px 12px;',
+        'border:1px dashed var(--border);border-radius:10px;}',
       '.pv-tm-muted{color:var(--muted);font-size:12px;}',
-      '.pv-tm-badge{display:inline-block;padding:1px 8px;border:1px solid var(--border);',
-        'border-radius:999px;font-size:11px;color:var(--muted);white-space:nowrap;}',
-      '.pv-tm-badge.ok{color:var(--accent);border-color:var(--accent);}',
-      '.pv-tm-settings{border-top:1px solid var(--border);padding-top:10px;',
-        'display:flex;flex-direction:column;gap:8px;}',
-      '.pv-tm-set-row{display:flex;align-items:center;gap:8px;font-size:12px;}',
-      '.pv-tm-set-label{min-width:72px;color:var(--muted);white-space:nowrap;}',
-      '.pv-tm-acct-row{display:flex;align-items:center;gap:8px;font-size:12px;}',
-      '.pv-tm-acct-row .pv-tm-acct-label{color:var(--text);min-width:0;',
-        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
-      '.pv-tm-acct-row .pv-tm-badge{margin-left:auto;}',
-      '.pv-tm-add-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}',
-      '.pv-tm-add-row .input{flex:1 1 120px;min-width:96px;}',
-      '.pv-tm-add-row .input.pv-tm-key-input{flex:2 1 150px;}',
+      // 设置区(侧栏卡内):小节标题 + 表单行
+      '.pv-tm-settings{display:flex;flex-direction:column;gap:8px;}',
+      '.pv-tm-section-title{font-size:12px;font-weight:600;color:var(--text);}',
+      '.pv-tm-form-row{display:flex;align-items:center;gap:8px;}',
+      '.pv-tm-form-row .input{flex:1 1 0;min-width:0;width:auto;}',
       '.pv-tm-add-status{color:var(--muted);font-size:12px;min-height:1em;}',
-      '.pv-tm-add-status.err{color:var(--danger);}'
+      '.pv-tm-add-status.err{color:var(--danger);}',
+      // 账号列表行
+      '.pv-tm-acct-list{display:flex;flex-direction:column;gap:6px;}',
+      '.pv-tm-acct-row{display:flex;align-items:center;gap:10px;padding:7px 10px;',
+        'border:1px solid var(--border);border-radius:8px;background:var(--panel);font-size:12px;}',
+      '.pv-tm-acct-chip{width:24px;height:24px;border-radius:7px;background:var(--panel-hover);',
+        'color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.03em;white-space:nowrap;',
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;}',
+      '.pv-tm-acct-main{display:flex;flex-direction:column;min-width:0;flex:1;gap:1px;}',
+      '.pv-tm-acct-name{color:var(--text);font-weight:600;overflow:hidden;',
+        'text-overflow:ellipsis;white-space:nowrap;}',
+      '.pv-tm-acct-sub{color:var(--muted);font-size:11px;overflow:hidden;',
+        'text-overflow:ellipsis;white-space:nowrap;}',
+      '.pv-tm-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;',
+        'color:var(--muted);flex-shrink:0;}',
+      '.pv-tm-status::before{content:"";width:6px;height:6px;border-radius:50%;',
+        'background:var(--border-strong);}',
+      '.pv-tm-status.ok{color:var(--accent);}',
+      '.pv-tm-status.ok::before{background:var(--accent);}',
+      '.pv-tm-acct-del{border:none;background:none;cursor:pointer;color:var(--muted);',
+        'padding:4px;border-radius:6px;display:inline-flex;align-items:center;flex-shrink:0;',
+        'transition:color .15s ease,background .15s ease;}',
+      '.pv-tm-acct-del:hover{color:var(--danger);background:var(--danger-soft);}',
+      // 轮询行:自制 switch(与宿主 .switch 同观感)+ 窄数字框
+      '.pv-tm-poll-row{display:flex;align-items:center;gap:10px;font-size:12px;}',
+      '.pv-tm-poll-label{color:var(--muted);}',
+      '.pv-tm-switch{position:relative;display:inline-block;width:34px;height:19px;flex-shrink:0;}',
+      '.pv-tm-switch input{opacity:0;width:0;height:0;position:absolute;margin:0;}',
+      '.pv-tm-switch span{position:absolute;inset:0;border-radius:999px;',
+        'background:var(--border-strong);transition:background .15s ease;cursor:pointer;}',
+      '.pv-tm-switch span::before{content:"";position:absolute;width:15px;height:15px;left:2px;top:2px;',
+        'border-radius:50%;background:var(--panel);transition:transform .15s ease;}',
+      '.pv-tm-switch input:checked + span{background:var(--accent);}',
+      '.pv-tm-switch input:checked + span::before{transform:translateX(15px);}',
+      '.pv-tm-poll-row .input{width:84px;margin-left:auto;flex:none;}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -825,7 +937,7 @@
     var center2 = ballError ? '!' : (pct === null ? '–' : (Math.round(pct * 100) / 100) + '%');
     ball.innerHTML =
       '<svg viewBox="0 0 76 76" width="76" height="76" aria-hidden="true">' +
-      '<circle cx="38" cy="38" r="32" fill="none" stroke="var(--border)" stroke-width="6"/>' +
+      '<circle cx="38" cy="38" r="32" fill="none" stroke="var(--border-strong)" stroke-width="6"/>' +
       '<circle class="pv-tm-ring" cx="38" cy="38" r="32" fill="none" stroke="' + stroke + '" stroke-width="6" ' +
       'stroke-linecap="round" stroke-dasharray="' + ring + '" stroke-dashoffset="' + offset + '" transform="rotate(-90 38 38)"/>' +
       '<text class="pv-tm-abbr" x="38" y="36" text-anchor="middle">' + abbr + intl + '</text>' +
@@ -1001,8 +1113,21 @@
     void pv.window.resize(BALL_SIZE, BALL_SIZE).catch(function () {});
   }
 
-  /** 菜单内容:直选账号(按供应商分组列账号,显示 label,✓ 当前)+ 立即刷新 +
-   *  打开详情面板 + 隐藏;返回填充完成 Promise(供扩窗前测量) */
+  /** 菜单动作行:同形小图标 + 文本(图标 muted,悬停随行转 accent) */
+  function buildMenuAction(text, icon, onClick) {
+    var item = tmEl('div', 'pv-tm-menu-item');
+    var label = tmEl('span', 'pv-tm-menu-label');
+    var iconSpan = tmEl('span', 'pv-tm-menu-icon');
+    iconSpan.innerHTML = icon;
+    label.appendChild(iconSpan);
+    label.appendChild(tmEl('span', null, text));
+    item.appendChild(label);
+    item.addEventListener('click', onClick);
+    return item;
+  }
+
+  /** 菜单内容:直选账号(按供应商分组列账号,label + ✓ 当前,选中加粗)+
+   *  立即刷新 / 打开详情面板 / 隐藏圆球(带图标);返回填充完成 Promise(供扩窗前测量) */
   function buildTmMenu(menu) {
     menu.innerHTML = '';
     return loadBallAccounts().then(function (accounts) {
@@ -1014,9 +1139,10 @@
           menu.appendChild(tmEl('div', 'pv-tm-menu-head', meta ? meta.label : providerKey));
           for (var j = 0; j < group.length; j++) {
             (function (account) {
-              var item = tmEl('div', 'pv-tm-menu-item');
-              item.appendChild(tmEl('span', null, account.label));
-              if (accountScope(account) === ballAccount) {
+              var selected = accountScope(account) === ballAccount;
+              var item = tmEl('div', 'pv-tm-menu-item' + (selected ? ' pv-tm-selected' : ''));
+              item.appendChild(tmEl('span', 'pv-tm-menu-label', account.label));
+              if (selected) {
                 item.appendChild(tmEl('span', 'pv-tm-check', '✓'));
               }
               item.addEventListener('click', function () {
@@ -1029,27 +1155,21 @@
         })(PROVIDER_ORDER[i]);
       }
       if (accounts.length > 0) menu.appendChild(tmEl('div', 'pv-tm-menu-sep'));
-      var refresh = tmEl('div', 'pv-tm-menu-item', tm('refreshNow'));
-      refresh.addEventListener('click', function () {
+      menu.appendChild(buildMenuAction(tm('refreshNow'), ICON_REFRESH, function () {
         closeTmMenu();
         refreshBallData();
-      });
-      var panel = tmEl('div', 'pv-tm-menu-item', tm('openPanel'));
-      panel.addEventListener('click', function () {
+      }));
+      menu.appendChild(buildMenuAction(tm('openPanel'), ICON_WINDOW, function () {
         closeTmMenu();
         pv.window.openPanel();
-      });
-      var hide = tmEl('div', 'pv-tm-menu-item', tm('hideBall'));
-      hide.addEventListener('click', function () {
+      }));
+      menu.appendChild(buildMenuAction(tm('hideBall'), ICON_HIDE, function () {
         closeTmMenu();
         stopPoll();
         pv.storage.set(KV_VISIBLE, false).then(function () {
           return pv.window.hide();
         }).catch(function () { /* 落盘失败仍尝试隐藏,下次启动按缺省显示 */ });
-      });
-      menu.appendChild(refresh);
-      menu.appendChild(panel);
-      menu.appendChild(hide);
+      }));
     });
   }
 
@@ -1062,15 +1182,18 @@
       ensureTmStyles();
       el.innerHTML = '';
       var root = tmEl('div', 'pv-tm-panel');
+      var colMain = tmEl('div', 'pv-tm-col');
+      var colSide = tmEl('div', 'pv-tm-col pv-tm-side');
 
       // 设置区:添加账号 + 账号列表 + 轮询设置(卡片在其上)
       var settings = tmEl('div', 'pv-tm-settings');
       var panelErrors = {}; // 账号 scope → 最近一次取数错误(不覆盖该账号 cache)
 
-      // ---- 添加行:供应商下拉(含国内/国际变体)+ 标签 + Key + 添加 ----
-      var addTitle = tmEl('div', 'pv-tm-set-label', tm('addAccount'));
+      // ---- 添加表单:第一行[供应商 | 标签],第二行[Key(或 AK/SK)| 添加] ----
+      var addTitle = tmEl('div', 'pv-tm-section-title', tm('addAccount'));
       settings.appendChild(addTitle);
-      var addRow = tmEl('div', 'pv-tm-add-row');
+      var addRow1 = tmEl('div', 'pv-tm-form-row');
+      var addRow2 = tmEl('div', 'pv-tm-form-row');
       var providerSelect = document.createElement('select');
       providerSelect.className = 'input';
       for (var pi = 0; pi < PROVIDER_ORDER.length; pi++) {
@@ -1085,19 +1208,19 @@
       labelInput.placeholder = tm('labelPh');
       labelInput.autocomplete = 'off';
       var keyInput = document.createElement('input');
-      keyInput.className = 'input pv-tm-key-input';
+      keyInput.className = 'input';
       keyInput.type = 'password';
       keyInput.placeholder = tm('keyPlaceholder');
       keyInput.autocomplete = 'off';
       // 火山系为 AK/SK 双值(凭据管理器按 "AK\nSK" 两行编码,读取侧见 Rust load_credential):
       // 单值 Key 输入框与 AK/SK 两输入框按所选供应商切换,都隐藏在密码框形态
       var akInput = document.createElement('input');
-      akInput.className = 'input pv-tm-key-input';
+      akInput.className = 'input';
       akInput.type = 'password';
       akInput.placeholder = tm('akPlaceholder');
       akInput.autocomplete = 'off';
       var skInput = document.createElement('input');
-      skInput.className = 'input pv-tm-key-input';
+      skInput.className = 'input';
       skInput.type = 'password';
       skInput.placeholder = tm('skPlaceholder');
       skInput.autocomplete = 'off';
@@ -1112,13 +1235,14 @@
       providerSelect.addEventListener('change', updateAddMode);
       updateAddMode();
       var addBtn = tmEl('button', 'btn small', tm('addBtn'));
-      addRow.appendChild(providerSelect);
-      addRow.appendChild(labelInput);
-      addRow.appendChild(keyInput);
-      addRow.appendChild(akInput);
-      addRow.appendChild(skInput);
-      addRow.appendChild(addBtn);
-      settings.appendChild(addRow);
+      addRow1.appendChild(providerSelect);
+      addRow1.appendChild(labelInput);
+      addRow2.appendChild(keyInput);
+      addRow2.appendChild(akInput);
+      addRow2.appendChild(skInput);
+      addRow2.appendChild(addBtn);
+      settings.appendChild(addRow1);
+      settings.appendChild(addRow2);
       var addStatus = tmEl('div', 'pv-tm-add-status');
       settings.appendChild(addStatus);
 
@@ -1177,24 +1301,27 @@
         });
       });
 
-      // ---- 账号列表行:[供应商+端点徽标 | label | 已配置徽标 | 删除] ----
-      var listTitle = tmEl('div', 'pv-tm-set-label', tm('accountList'));
+      // ---- 账号列表:[缩写徽标 | label + 供应商 | 配置状态点 | 删除] ----
+      var listTitle = tmEl('div', 'pv-tm-section-title', tm('accountList'));
       settings.appendChild(listTitle);
       var acctList = tmEl('div', 'pv-tm-acct-list');
       settings.appendChild(acctList);
 
-      // ---- 轮询设置行:开关 + 间隔(钳制 ≥120s;默认关;存 ball.poll) ----
-      var pollRow = tmEl('div', 'pv-tm-set-row');
-      pollRow.appendChild(tmEl('span', 'pv-tm-set-label', tm('pollLabel')));
+      // ---- 轮询行:switch + 间隔(钳制 ≥120s;默认关;存 ball.poll) ----
+      var pollRow = tmEl('div', 'pv-tm-poll-row');
+      pollRow.appendChild(tmEl('span', 'pv-tm-poll-label', tm('pollLabel')));
+      var switchWrap = tmEl('label', 'pv-tm-switch');
       var pollCheck = document.createElement('input');
       pollCheck.type = 'checkbox';
+      switchWrap.appendChild(pollCheck);
+      switchWrap.appendChild(document.createElement('span'));
+      pollRow.appendChild(switchWrap);
       var pollInput = document.createElement('input');
       pollInput.className = 'input';
       pollInput.type = 'number';
       pollInput.min = String(POLL_MIN_SEC);
       pollInput.step = '30';
       pollInput.title = tm('pollInterval');
-      pollRow.appendChild(pollCheck);
       pollRow.appendChild(pollInput);
       settings.appendChild(pollRow);
 
@@ -1219,9 +1346,7 @@
         pollInput.value = cfg && cfg.intervalSec ? String(clampPollSec(cfg.intervalSec)) : String(POLL_DEFAULT_SEC);
       }).catch(function () {});
 
-      root.appendChild(settings);
-
-      // ---- 卡片区:每账号一张卡 + 「全部刷新」(卡片在上、设置区在下,沿用原层级) ----
+      // ---- 卡片区:每账号一张卡 + 「全部刷新」(左列;设置区入右侧栏) ----
       var cardsHead = tmEl('div', 'pv-tm-cards-head');
       var refreshAllBtn = tmEl('button', 'btn small', tm('refreshAll'));
       refreshAllBtn.addEventListener('click', function () {
@@ -1244,8 +1369,11 @@
       cardsHead.appendChild(refreshAllBtn);
 
       var cards = tmEl('div', 'pv-tm-cards');
-      el.appendChild(cardsHead);
-      el.appendChild(cards);
+      colMain.appendChild(cardsHead);
+      colMain.appendChild(cards);
+      colSide.appendChild(settings);
+      root.appendChild(colMain);
+      root.appendChild(colSide);
       el.appendChild(root);
 
       /** 整区重渲染(账号列表 + 卡片;addStatus 保持) */
@@ -1260,7 +1388,7 @@
         ensureAccountsMigrated().then(function (accounts) {
           acctList.innerHTML = '';
           if (accounts.length === 0) {
-            acctList.appendChild(tmEl('div', 'pv-tm-muted', tm('panelEmpty')));
+            acctList.appendChild(tmEl('div', 'pv-tm-empty', tm('panelEmpty')));
             return;
           }
           var probes = accounts.map(function (account) {
@@ -1284,13 +1412,20 @@
         var meta = PROVIDERS[account.provider];
         var row = tmEl('div', 'pv-tm-acct-row');
         var scope = accountScope(account);
-        var badge = tmEl('span', 'pv-tm-badge', meta ? meta.label : account.provider);
-        badge.title = meta ? meta.endpoint : account.provider;
-        row.appendChild(badge);
-        row.appendChild(tmEl('span', 'pv-tm-acct-label', account.label));
-        row.appendChild(tmEl('span', 'pv-tm-badge' + (configuredOk ? ' ok' : ''),
+        var chip = tmEl('span', 'pv-tm-acct-chip', meta ? meta.abbr : '?');
+        chip.title = meta ? meta.endpoint : account.provider;
+        row.appendChild(chip);
+        var main = tmEl('div', 'pv-tm-acct-main');
+        main.appendChild(tmEl('div', 'pv-tm-acct-name', account.label));
+        main.appendChild(tmEl('div', 'pv-tm-acct-sub', meta ? meta.label : account.provider));
+        row.appendChild(main);
+        row.appendChild(tmEl('span', 'pv-tm-status' + (configuredOk ? ' ok' : ''),
           configuredOk ? tm('configured') : tm('notConfigured')));
-        var delBtn = tmEl('button', 'btn small', tm('removeAccount'));
+        var delBtn = tmEl('button', 'pv-tm-acct-del');
+        delBtn.type = 'button';
+        delBtn.title = tm('removeAccount');
+        delBtn.setAttribute('aria-label', tm('removeAccount'));
+        delBtn.innerHTML = ICON_TRASH;
         delBtn.addEventListener('click', function () {
           delBtn.disabled = true;
           pv.credentials.delete(scope).then(function () {
@@ -1319,7 +1454,7 @@
         ensureAccountsMigrated().then(function (accounts) {
           cards.innerHTML = '';
           if (accounts.length === 0) {
-            cards.appendChild(tmEl('div', 'pv-tm-muted', tm('panelEmpty')));
+            cards.appendChild(tmEl('div', 'pv-tm-empty', tm('panelEmpty')));
             refreshAllBtn.disabled = true;
             return;
           }
@@ -1338,12 +1473,16 @@
         });
       }
 
-      /** 单张卡:标题=供应商名+label,副标题=端点;5h(百分比+倒计时)/ 周 /
-       *  24h 聚合(GLM 系)/ MCP 月度(GLM 系) */
+      /** 单张卡:卡头=缩写徽标+供应商名·label+端点;5h/周计量条(≥80% danger,
+       *  条下倒计时);GLM 系另附 24h 聚合 / MCP 月度双瓦片 */
       function buildCard(account, data, errorText) {
         var meta = PROVIDERS[account.provider];
         var card = tmEl('div', 'pv-tm-card');
         var head = tmEl('div', 'pv-tm-card-head');
+        var chip = tmEl('span', 'pv-tm-abbr-chip');
+        chip.innerHTML = (meta ? meta.abbr : '?') + (meta && meta.intl ? '<sup>i</sup>' : '');
+        chip.title = meta ? meta.endpoint : account.provider;
+        head.appendChild(chip);
         var titlewrap = tmEl('div', 'pv-tm-card-titlewrap');
         titlewrap.appendChild(tmEl('div', 'pv-tm-card-title',
           (meta ? meta.label : account.provider) + ' · ' + account.label));
@@ -1365,37 +1504,52 @@
 
         var five = (data && data.fiveHour) || {};
         var week = (data && data.weekly) || {};
-        card.appendChild(statRow(tm('fiveHour'), five));
-        card.appendChild(statRow(tm('weekly'), week));
+        card.appendChild(meterBlock(tm('fiveHour'), five));
+        card.appendChild(meterBlock(tm('weekly'), week));
         if (meta && meta.family === 'glm') {
+          var tiles = tmEl('div', 'pv-tm-tiles');
           var tokens = data && typeof data.tokens24h === 'number' ? data.tokens24h : null;
-          var row = tmEl('div', 'pv-tm-row');
-          row.appendChild(tmEl('span', null, tm('tokens24h')));
-          row.appendChild(tmEl('span', 'pv-tm-val', tokens === null ? tm('noData') : String(tokens)));
-          card.appendChild(row);
+          tiles.appendChild(statTile(tm('tokens24h'),
+            tokens === null ? tm('noData') : formatTokens(tokens)));
           var mcp = data && data.mcpMonthly;
-          var mcpText = mcp ? (String(mcp.usage) + ' / ' + String(mcp.currentValue)) : tm('noData');
-          var row2 = tmEl('div', 'pv-tm-row');
-          row2.appendChild(tmEl('span', null, tm('mcpMonthly')));
-          row2.appendChild(tmEl('span', 'pv-tm-val', mcpText));
-          card.appendChild(row2);
+          var mcpText = mcp
+            ? (formatTokens(mcp.usage) || tm('noData')) + ' / ' + (formatTokens(mcp.currentValue) || tm('noData'))
+            : tm('noData');
+          tiles.appendChild(statTile(tm('mcpMonthly'), mcpText));
+          card.appendChild(tiles);
         }
         if (errorText) card.appendChild(tmEl('div', 'pv-tm-card-error', errorText));
         return card;
       }
 
-      /** 百分比行:value ≥80% 转 danger 色 */
-      function statRow(label, win) {
-        var row = tmEl('div', 'pv-tm-row');
-        row.appendChild(tmEl('span', null, label));
-        var pct = win && win.percent !== null && win.percent !== undefined
-          ? win.percent : null;
-        var val = pct === null
-          ? tm('noData')
-          : pct + '%' + (win.resetAt ? ' · ' + formatCountdown(win.resetAt) : '');
-        var span = tmEl('span', 'pv-tm-val' + (pct !== null && pct >= 80 ? ' danger' : ''), val);
-        row.appendChild(span);
-        return row;
+      /** 计量条:名称+百分比(≥80% danger)+ track/fill + 距重置倒计时 */
+      function meterBlock(name, win) {
+        var pct = win && win.percent !== null && win.percent !== undefined ? win.percent : null;
+        var danger = pct !== null && pct >= 80;
+        var wrap = tmEl('div', 'pv-tm-meter');
+        var top = tmEl('div', 'pv-tm-meter-top');
+        top.appendChild(tmEl('span', 'pv-tm-meter-name', name));
+        top.appendChild(tmEl('span', 'pv-tm-meter-val' + (danger ? ' danger' : ''),
+          pct === null ? tm('noData') : pct + '%'));
+        wrap.appendChild(top);
+        var track = tmEl('div', 'pv-tm-meter-track');
+        var fill = tmEl('div', 'pv-tm-meter-fill' + (danger ? ' danger' : ''));
+        fill.style.width = (pct === null ? 0 : Math.min(100, Math.max(0, pct))) + '%';
+        track.appendChild(fill);
+        wrap.appendChild(track);
+        if (win && win.resetAt) {
+          var cd = formatCountdown(win.resetAt);
+          if (cd) wrap.appendChild(tmEl('div', 'pv-tm-meter-sub', tm('resetsIn') + ' ' + cd));
+        }
+        return wrap;
+      }
+
+      /** 静态数值瓦片(24h 聚合 / MCP 月度) */
+      function statTile(label, value) {
+        var tile = tmEl('div', 'pv-tm-tile');
+        tile.appendChild(tmEl('span', 'pv-tm-tile-label', label));
+        tile.appendChild(tmEl('span', 'pv-tm-tile-value', value));
+        return tile;
       }
 
       rerender();

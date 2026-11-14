@@ -1,0 +1,198 @@
+<!doctype html>
+<!-- 球窗夹具:模拟 pv-plugin-token-monitor 球窗实例(预览/dev 专用,不参与构建)。
+     以最小 pv 桥(内存 kv + 罐头响应)+ 真实 main.js 源码驱动球体与右键菜单,
+     用于亮/暗令牌与不同壁纸下的人工走查;窗口尺寸/拖动等 Rust 行为一律 noop。 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>球窗夹具 — 用量监控</title>
+    <style>
+      /* 与 src/App.css 同步的主题令牌(夹具离线,直接内联) */
+      :root {
+        --bg: #f5f6f8; --panel: #ffffff; --panel-hover: #f6f7f9;
+        --border: #e3e5ea; --border-strong: #c9cdd6;
+        --text: #1f2329; --muted: #8a9099;
+        --accent: #4f6ef2; --accent-hover: #3f5ce0; --accent-soft: #eef1ff;
+        --on-accent: #ffffff; --danger: #d4494f; --danger-soft: #fdf1f1;
+        --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.18);
+      }
+      :root[data-theme="dark"] {
+        --bg: #17181c; --panel: #1f2127; --panel-hover: #262932;
+        --border: #2e3138; --border-strong: #3d414b;
+        --text: #e8eaf0; --muted: #9aa0ab;
+        --accent: #6b83f3; --accent-hover: #5871ea; --accent-soft: #262c47;
+        --danger: #e06b70; --danger-soft: #3a2629;
+        --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+      }
+      html, body { height: 100%; margin: 0; }
+      body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .desktop { position: relative; height: 100vh; overflow: hidden;
+        background: linear-gradient(135deg, #2b5876 0%, #4e4376 55%, #6b5b95 100%); }
+      .desktop.light-wall { background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%); }
+      .pv-window { position: absolute; left: 140px; top: 150px; width: 84px; height: 84px; }
+      .controls { position: fixed; right: 12px; top: 12px; display: flex; gap: 8px; }
+      .controls button { padding: 4px 10px; border: 1px solid rgba(255, 255, 255, 0.55);
+        background: rgba(255, 255, 255, 0.16); color: #fff; border-radius: 6px;
+        cursor: pointer; font-size: 12px; }
+      .controls button:hover { background: rgba(255, 255, 255, 0.3); }
+      .hint { position: fixed; left: 12px; bottom: 12px; color: rgba(255, 255, 255, 0.85);
+        font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+    </style>
+  </head>
+  <body>
+    <div class="desktop light-wall" id="desktop">
+      <div class="pv-window" id="ball-root"></div>
+    </div>
+    <div class="controls">
+      <button id="btn-theme">暗色令牌</button>
+      <button id="btn-wall">换壁纸</button>
+      <button id="btn-menu">模拟右键</button>
+    </div>
+    <div class="hint">球窗夹具:球体 + 右键菜单走查(窗口扩缩/拖动为 noop)</div>
+    <script type="module">
+      // ---- 最小 pv 桥:内存 kv + 罐头用量响应(与 preview/mock-core.ts 同形) ----
+      var now = Date.now();
+      var kv = new Map(Object.entries({
+        "tm.accounts": [
+          { provider: "glm", label: "default" },
+          { provider: "glm", label: "备用" },
+          { provider: "glm-intl", label: "intl" },
+          { provider: "volcengine", label: "default" },
+          { provider: "opencode", label: "zen" },
+        ],
+        "ball.provider": "glm:default",
+        "ball.poll": { enabled: false, intervalSec: 300 },
+        "cache:glm:default": {
+          provider: "glm",
+          fiveHour: { percent: 23.5, resetAt: new Date(now + 2 * 3600e3 + 13 * 60e3).toISOString() },
+          weekly: { percent: 61.2, resetAt: new Date(now + 3 * 86400e3).toISOString() },
+          tokens24h: 44320, mcpMonthly: { currentValue: 800, usage: 230, remaining: 570 },
+          fetchedAt: now,
+        },
+        "cache:glm:备用": {
+          provider: "glm",
+          fiveHour: { percent: 88.4, resetAt: new Date(now + 40 * 60e3).toISOString() },
+          weekly: { percent: 30.1, resetAt: new Date(now + 2 * 86400e3).toISOString() },
+          tokens24h: 1520000, mcpMonthly: { currentValue: 1000, usage: 640, remaining: 360 },
+          fetchedAt: now,
+        },
+        "cache:glm-intl:intl": {
+          provider: "glm-intl",
+          fiveHour: { percent: 52.0, resetAt: new Date(now + 3 * 3600e3).toISOString() },
+          weekly: { percent: 12.4, resetAt: new Date(now + 4 * 86400e3).toISOString() },
+          tokens24h: 99000000, mcpMonthly: null, fetchedAt: now,
+        },
+        "cache:volcengine:default": {
+          provider: "volcengine",
+          fiveHour: { percent: 25, resetAt: new Date(now + 90 * 60e3).toISOString() },
+          weekly: { percent: 22.5, resetAt: new Date(now + 3 * 86400e3).toISOString() },
+          fetchedAt: now,
+        },
+        "cache:opencode:zen": {
+          provider: "opencode",
+          fiveHour: { percent: 83.3, resetAt: new Date(now + 4 * 3600e3).toISOString() },
+          weekly: { percent: 42.1, resetAt: new Date(now + 3 * 86400e3).toISOString() },
+          fetchedAt: now,
+        },
+      }));
+
+      function cannedNetBody(url) {
+        if (url.includes("/api/monitor/usage/quota/limit")) {
+          return JSON.stringify({
+            data: {
+              level: "pro",
+              limits: [
+                { type: "TOKENS_LIMIT", percentage: 23.5, nextResetTime: now + 2 * 3600e3 + 13 * 60e3 },
+                { type: "TOKENS_LIMIT", percentage: 61.2, nextResetTime: now + 3 * 86400e3 },
+                { type: "TIME_LIMIT", currentValue: 800, usage: 230, remaining: 570 },
+              ],
+            },
+          });
+        }
+        if (url.includes("/api/monitor/usage/model-usage")) {
+          var buckets = [];
+          for (var i = 0; i < 8; i++) buckets.push({ input: 1200 + i * 100, output: 3400 + i * 150 });
+          return JSON.stringify({ data: { tokensUsage: buckets } });
+        }
+        if (url.includes("Action=GetAFPUsage")) {
+          return JSON.stringify({
+            Result: {
+              AFPFiveHour: { Quota: "50.0", Used: "12.5", ResetTime: Math.floor((now + 90 * 60e3) / 1000) },
+              AFPWeekly: { Quota: "200.0", Used: "45.0", ResetTime: Math.floor((now + 3 * 86400e3) / 1000) },
+            },
+          });
+        }
+        if (url.includes("zen/go/v1/usage")) {
+          return JSON.stringify({
+            usage: {
+              rolling: { status: "ok", percent: 83.3, resetsAt: new Date(now + 4 * 3600e3).toISOString() },
+              weekly: { status: "ok", percent: 42.1, resetsAt: new Date(now + 3 * 86400e3).toISOString() },
+            },
+          });
+        }
+        return "{}";
+      }
+
+      var pvWindowSetup = null;
+      var bridge = {
+        pluginId: "token-monitor",
+        storage: {
+          get: function (key) {
+            return Promise.resolve(kv.has(key) ? JSON.parse(JSON.stringify(kv.get(key))) : null);
+          },
+          set: function (key, value) {
+            kv.set(key, value === null ? null : JSON.parse(JSON.stringify(value)));
+            return Promise.resolve();
+          },
+        },
+        credentials: {
+          configured: function () { return Promise.resolve(true); },
+          set: function () { return Promise.resolve(); },
+          delete: function () { return Promise.resolve(); },
+        },
+        net: {
+          fetch: function (url) {
+            return Promise.resolve({ status: 200, body: cannedNetBody(url) });
+          },
+        },
+        window: {
+          setup: function (cfg) { pvWindowSetup = cfg; },
+          resize: function () { return Promise.resolve(); },
+          hide: function () { return Promise.resolve(); },
+          openPanel: function () { return Promise.resolve(); },
+        },
+        panel: { register: function () {} },
+        i18n: { register: function () {} },
+        commands: { register: function () {} },
+      };
+
+      // 球窗实例判定:main.js 读 __TAURI_INTERNALS__.metadata.currentWindow.label
+      window.__TAURI_INTERNALS__ = {
+        metadata: { currentWindow: { label: "pv-plugin-token-monitor" } },
+        invoke: function () { return Promise.resolve(); },
+      };
+
+      const src = await fetch("/plugins-src/token-monitor/main.js").then(function (r) { return r.text(); });
+      (new Function("pv", '"use strict";\n' + src))(bridge);
+      if (pvWindowSetup && typeof pvWindowSetup.onMount === "function") {
+        pvWindowSetup.onMount(document.getElementById("ball-root"));
+      }
+
+      // ---- 夹具控制:主题 / 壁纸 / 右键菜单 ----
+      document.getElementById("btn-theme").addEventListener("click", function (e) {
+        const dark = document.documentElement.dataset.theme !== "dark";
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        e.target.textContent = dark ? "亮色令牌" : "暗色令牌";
+      });
+      document.getElementById("btn-wall").addEventListener("click", function () {
+        document.getElementById("desktop").classList.toggle("light-wall");
+      });
+      document.getElementById("btn-menu").addEventListener("click", function () {
+        const wrap = document.querySelector(".pv-tm-wrap");
+        if (wrap) {
+          wrap.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+        }
+      });
+    </script>
+  </body>
+</html>
