@@ -444,6 +444,8 @@
       providerPh: '选择供应商',
       labelPh: '账号标签(如 主号/备用)',
       keyPlaceholder: '粘贴 API Key',
+      akPlaceholder: '粘贴 Access Key(AK)',
+      skPlaceholder: '粘贴 Secret Key(SK)',
       addBtn: '添加',
       accountList: '账号列表',
       configured: '已配置',
@@ -452,6 +454,7 @@
       labelInvalid: '标签需为 1-16 位字母/数字/下划线/连字符/中文(禁冒号斜杠空白)',
       labelDuplicate: '同一供应商下已有同名账号',
       keyRequired: 'Key 不能为空',
+      akSkRequired: 'AK 与 SK 均不能为空',
       addOk: '账号已添加',
       pollLabel: '自动轮询(球窗常驻刷新)',
       pollInterval: '间隔(秒,≥120)',
@@ -476,6 +479,8 @@
       providerPh: 'Select provider',
       labelPh: 'Account label (e.g. main/spare)',
       keyPlaceholder: 'Paste API key',
+      akPlaceholder: 'Paste access key (AK)',
+      skPlaceholder: 'Paste secret key (SK)',
       addBtn: 'Add',
       accountList: 'Accounts',
       configured: 'Configured',
@@ -484,6 +489,7 @@
       labelInvalid: 'Label must be 1-16 chars of letters/digits/underscore/hyphen/CJK',
       labelDuplicate: 'An account with the same label already exists for this provider',
       keyRequired: 'Key is required',
+      akSkRequired: 'Both AK and SK are required',
       addOk: 'Account added',
       pollLabel: 'Auto poll (ball refresh)',
       pollInterval: 'Interval (sec, ≥120)',
@@ -1083,10 +1089,34 @@
       keyInput.type = 'password';
       keyInput.placeholder = tm('keyPlaceholder');
       keyInput.autocomplete = 'off';
+      // 火山系为 AK/SK 双值(凭据管理器按 "AK\nSK" 两行编码,读取侧见 Rust load_credential):
+      // 单值 Key 输入框与 AK/SK 两输入框按所选供应商切换,都隐藏在密码框形态
+      var akInput = document.createElement('input');
+      akInput.className = 'input pv-tm-key-input';
+      akInput.type = 'password';
+      akInput.placeholder = tm('akPlaceholder');
+      akInput.autocomplete = 'off';
+      var skInput = document.createElement('input');
+      skInput.className = 'input pv-tm-key-input';
+      skInput.type = 'password';
+      skInput.placeholder = tm('skPlaceholder');
+      skInput.autocomplete = 'off';
+      var volcMode = false;
+      var updateAddMode = function () {
+        var meta = PROVIDERS[providerSelect.value];
+        volcMode = !!(meta && meta.family === 'volcengine');
+        keyInput.style.display = volcMode ? 'none' : '';
+        akInput.style.display = volcMode ? '' : 'none';
+        skInput.style.display = volcMode ? '' : 'none';
+      };
+      providerSelect.addEventListener('change', updateAddMode);
+      updateAddMode();
       var addBtn = tmEl('button', 'btn small', tm('addBtn'));
       addRow.appendChild(providerSelect);
       addRow.appendChild(labelInput);
       addRow.appendChild(keyInput);
+      addRow.appendChild(akInput);
+      addRow.appendChild(skInput);
       addRow.appendChild(addBtn);
       settings.appendChild(addRow);
       var addStatus = tmEl('div', 'pv-tm-add-status');
@@ -1101,10 +1131,19 @@
       addBtn.addEventListener('click', function () {
         var provider = providerSelect.value;
         var label = labelInput.value.trim();
-        var secret = keyInput.value;
+        var secret;
+        if (volcMode) {
+          // 火山系:AK/SK 分别录入,拼接为 "AK\nSK" 两行编码写入凭据管理器
+          var ak = akInput.value.trim();
+          var sk = skInput.value.trim();
+          if (ak === '' || sk === '') { showAddStatus(tm('akSkRequired'), true); return; }
+          secret = ak + '\n' + sk;
+        } else {
+          secret = keyInput.value;
+          if (secret === '') { showAddStatus(tm('keyRequired'), true); return; }
+        }
         if (!PROVIDERS[provider]) { showAddStatus(tm('providerPh'), true); return; }
         if (!isValidLabel(label)) { showAddStatus(tm('labelInvalid'), true); return; }
-        if (secret === '') { showAddStatus(tm('keyRequired'), true); return; }
         ensureAccountsMigrated().then(function (accounts) {
           var scope = provider + ':' + label;
           for (var i = 0; i < accounts.length; i++) {
@@ -1119,6 +1158,8 @@
             return writeAccounts(next).then(function () {
               labelInput.value = '';
               keyInput.value = '';
+              akInput.value = '';
+              skInput.value = '';
               showAddStatus(tm('addOk'), false);
               return fetchAndCache({ provider: provider, label: label })
                 .catch(function (err) {
