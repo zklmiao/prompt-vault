@@ -1,0 +1,10 @@
+{
+  "id": "lang-english",
+  "name": "English 语言包",
+  "version": "1.0.0",
+  "minAppVersion": "0.2.0-alpha",
+  "type": "i18n",
+  "ui": "none",
+  "languages": ["en"],
+  "permissions": []
+}
