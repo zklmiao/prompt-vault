@@ -391,6 +391,24 @@ fn single_key_env_name(provider: &str) -> String {
     format!("PROMPT_VAULT_{}_KEY", provider.to_uppercase().replace('-', "_"))
 }
 
+/// 火山系 provider(国内 volcengine / 国际 volcengine-intl)均为 AK/SK 双值语义:
+/// keyring 条目按 "AK\nSK" 两行编码,环境变量为 `PROMPT_VAULT_<PROVIDER>_AK`/`_SK`
+/// (国际变体即 `PROMPT_VAULT_VOLCENGINE_INTL_AK`/`_SK`)。判定按家族而非精确名,
+/// 否则国际变体会落进单值 Key 路径,签名模式匹配必然报错。
+fn is_volcengine_provider(provider: &str) -> bool {
+    provider == "volcengine" || provider == "volcengine-intl"
+}
+
+/// 火山系 provider → AK 环境变量名
+fn volc_env_ak_name(provider: &str) -> String {
+    format!("PROMPT_VAULT_{}_AK", provider.to_uppercase().replace('-', "_"))
+}
+
+/// 火山系 provider → SK 环境变量名
+fn volc_env_sk_name(provider: &str) -> String {
+    format!("PROMPT_VAULT_{}_SK", provider.to_uppercase().replace('-', "_"))
+}
+
 /// 凭据只从环境变量或凭据管理器读取;空串凭据一律视为未设置
 /// (统一在本函数过滤,不依赖调用方);getenv 注入以便单测隔离真实环境。
 ///
@@ -410,14 +428,15 @@ fn load_credential(
         return Err("凭据 scope 不合法".to_string());
     };
     let not_empty = |s: &String| !s.is_empty();
-    if provider == "volcengine" {
-        // 命名例外:火山 AK/SK 双值环境变量
+    if is_volcengine_provider(provider) {
+        // 命名例外:火山系 AK/SK 双值环境变量(国内/国际变体各自命名)
         let read_ak_sk = |ak: Option<String>, sk: Option<String>| match (ak, sk) {
             (Some(ak), Some(sk)) => Ok(Some(AuthSecret::AkSk(ak, sk))),
-            (Some(_), None) | (None, Some(_)) => Err(
-                "环境变量 PROMPT_VAULT_VOLCENGINE_AK 与 PROMPT_VAULT_VOLCENGINE_SK 需同时设置"
-                    .to_string(),
-            ),
+            (Some(_), None) | (None, Some(_)) => Err(format!(
+                "环境变量 {} 与 {} 需同时设置",
+                volc_env_ak_name(provider),
+                volc_env_sk_name(provider)
+            )),
             (None, None) => Ok(None),
         };
         let from_keyring = |name: &str| -> Result<Option<AuthSecret>, String> {
@@ -429,7 +448,9 @@ fn load_credential(
                         (Some(ak), Some(sk)) if !ak.is_empty() && !sk.is_empty() => {
                             Ok(Some(AuthSecret::AkSk(ak.to_string(), sk.to_string())))
                         }
-                        _ => Err("volcengine 凭据格式不正确:应为 AK/SK 双值(以换行分隔)".to_string()),
+                        _ => Err(format!(
+                            "{provider} 凭据格式不正确:应为 AK/SK 双值(以换行分隔)"
+                        )),
                     }
                 }
                 None => Ok(None),
@@ -437,16 +458,16 @@ fn load_credential(
         };
         if label.is_none() {
             if let Some(secret) = read_ak_sk(
-                getenv("PROMPT_VAULT_VOLCENGINE_AK").filter(not_empty),
-                getenv("PROMPT_VAULT_VOLCENGINE_SK").filter(not_empty),
+                getenv(&volc_env_ak_name(provider)).filter(not_empty),
+                getenv(&volc_env_sk_name(provider)).filter(not_empty),
             )? {
                 return Ok(secret);
             }
             return match from_keyring(scope)? {
                 Some(secret) => Ok(secret),
-                None => Err(
-                    "未找到 volcengine 凭据:请先在设置中录入 AK/SK,或设置环境变量".to_string(),
-                ),
+                None => Err(format!(
+                    "未找到 {provider} 凭据:请先在设置中录入 AK/SK,或设置环境变量"
+                )),
             };
         }
         // labeled:自名条目 → [default: env 完整成对才用,半配继续回落] → legacy 旧条目
@@ -455,8 +476,8 @@ fn load_credential(
         }
         if label == Some(crate::credentials::DEFAULT_LABEL) {
             let env_pair = read_ak_sk(
-                getenv("PROMPT_VAULT_VOLCENGINE_AK").filter(not_empty),
-                getenv("PROMPT_VAULT_VOLCENGINE_SK").filter(not_empty),
+                getenv(&volc_env_ak_name(provider)).filter(not_empty),
+                getenv(&volc_env_sk_name(provider)).filter(not_empty),
             );
             // 半配(Err)不阻断:default 账号的 env 是次选,回落旧条目优先保可用
             if let Ok(Some(secret)) = env_pair {
@@ -517,10 +538,10 @@ pub(crate) fn real_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
-/// provider 的凭据环境变量是否已配置:单值 Key 非空;volcengine 为 AK/SK 双值,
-/// 两者都非空才算配置。命名与空串语义与 load_credential 完全一致(getenv 注入便于单测)。
-/// 参数是 provider 段(scope 的 `<provider>` 部分):env 固定映射 provider 的
-/// default 账号,不含 label 维度。
+/// provider 的凭据环境变量是否已配置:单值 Key 非空;火山系(国内/国际)为 AK/SK
+/// 双值,两者都非空才算配置。命名与空串语义与 load_credential 完全一致(getenv 注入
+/// 便于单测)。参数是 provider 段(scope 的 `<provider>` 部分):env 固定映射
+/// provider 的 default 账号,不含 label 维度。
 pub(crate) fn credential_env_configured_with(
     provider: &str,
     getenv: &dyn Fn(&str) -> Option<String>,
@@ -529,9 +550,9 @@ pub(crate) fn credential_env_configured_with(
         return false;
     }
     let not_empty = |v: &Option<String>| v.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
-    if provider == "volcengine" {
-        return not_empty(&getenv("PROMPT_VAULT_VOLCENGINE_AK"))
-            && not_empty(&getenv("PROMPT_VAULT_VOLCENGINE_SK"));
+    if is_volcengine_provider(provider) {
+        return not_empty(&getenv(&volc_env_ak_name(provider)))
+            && not_empty(&getenv(&volc_env_sk_name(provider)));
     }
     not_empty(&getenv(&single_key_env_name(provider)))
 }
@@ -1034,6 +1055,71 @@ mod tests {
         let broken = MemKeyring::new();
         broken.set("volcengine:main", "only-ak-line").unwrap();
         assert!(load_credential(&broken, "volcengine:main", &no_env).is_err());
+    }
+
+    /// 火山系国际变体(volcengine-intl)与国内同属 AK/SK 家族:此前按精确名判定,
+    /// 国际变体会落进单值 Key 路径导致签名模式必错(实机冒烟抓出)。本测试钉死:
+    /// 自名/回落/env 命名(PROMPT_VAULT_VOLCENGINE_INTL_AK/_SK)全链 AK/SK 语义
+    #[test]
+    fn load_credential_volcengine_intl_family_is_ak_sk() {
+        let no_env = env_map(&[]);
+        // 自名条目 "AK\nSK" → AkSk(而非含换行的单值串)
+        let store = MemKeyring::new();
+        store
+            .set("volcengine-intl:main", "test-ak-1234\ntest-sk-5678")
+            .unwrap();
+        match load_credential(&store, "volcengine-intl:main", &no_env).unwrap() {
+            AuthSecret::AkSk(ak, sk) => {
+                assert_eq!(ak, "test-ak-1234");
+                assert_eq!(sk, "test-sk-5678");
+            }
+            _ => panic!("volcengine-intl:main 应解析为 AK/SK 双值"),
+        }
+        // labeled default:env 按国际变体命名命中
+        let fresh = MemKeyring::new();
+        let intl_env = env_map(&[
+            ("PROMPT_VAULT_VOLCENGINE_INTL_AK", "test-ak-intl"),
+            ("PROMPT_VAULT_VOLCENGINE_INTL_SK", "test-sk-intl"),
+        ]);
+        match load_credential(&fresh, "volcengine-intl:default", &intl_env).unwrap() {
+            AuthSecret::AkSk(ak, sk) => {
+                assert_eq!(ak, "test-ak-intl");
+                assert_eq!(sk, "test-sk-intl");
+            }
+            _ => panic!("volcengine-intl:default 应读国际变体 env"),
+        }
+        // 回落旧条目(volcengine-intl)
+        let legacy = MemKeyring::new();
+        legacy
+            .set("volcengine-intl", "test-ak-legacy\ntest-sk-legacy")
+            .unwrap();
+        match load_credential(&legacy, "volcengine-intl:main", &no_env).unwrap() {
+            AuthSecret::AkSk(ak, sk) => {
+                assert_eq!(ak, "test-ak-legacy");
+                assert_eq!(sk, "test-sk-legacy");
+            }
+            _ => panic!("volcengine-intl:main 应回落旧条目"),
+        }
+        // configured 同语义:intl env 成对命中;国内 env 不串到 intl
+        assert!(crate::credentials::credential_configured_with(
+            &fresh,
+            "volcengine-intl:default",
+            &intl_env
+        )
+        .unwrap());
+        let domestic_env = env_map(&[
+            ("PROMPT_VAULT_VOLCENGINE_AK", "test-ak-1234"),
+            ("PROMPT_VAULT_VOLCENGINE_SK", "test-sk-5678"),
+        ]);
+        assert!(!crate::credentials::credential_configured_with(
+            &fresh,
+            "volcengine-intl:default",
+            &domestic_env
+        )
+        .unwrap(), "国内 env 不映射国际变体账号");
+        // credential_env_configured_with 直接探测 intl 命名
+        assert!(credential_env_configured_with("volcengine-intl", &intl_env));
+        assert!(!credential_env_configured_with("volcengine-intl", &domestic_env));
     }
 
     // ---------- 火山签名规范化 ----------
