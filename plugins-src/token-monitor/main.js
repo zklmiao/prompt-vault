@@ -1107,7 +1107,11 @@
   }
 
   function closeTmMenu(wrap) {
-    var menu = wrap && wrap.querySelector('.pv-tm-menu');
+    // wrap 缺省回退 document:菜单项点击闭包(buildTmMenu 内)只握 menu 不握 wrap,
+    // 1.1.0/1.1.1 的四处裸调用曾在此静默 early-return —— 菜单收不起、窗口保持
+    // 扩窗,仅 blur 路径带 wrap 可收(1.1.2 实机验证抓出,backlog 有案)。
+    // 球窗内 .pv-tm-menu 唯一,按根节点回退查找无歧义
+    var menu = (wrap || document).querySelector('.pv-tm-menu');
     if (!menu || menu.hidden) return;
     menu.hidden = true;
     void pv.window.resize(BALL_SIZE, BALL_SIZE).catch(function () {});

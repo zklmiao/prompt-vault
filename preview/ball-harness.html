@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- 球窗夹具:模拟 pv-plugin-token-monitor 球窗实例(预览/dev 专用,不参与构建)。
      以最小 pv 桥(内存 kv + 罐头响应)+ 真实 main.js 源码驱动球体与右键菜单,
-     用于亮/暗令牌与不同壁纸下的人工走查;窗口尺寸/拖动等 Rust 行为一律 noop。 -->
+     用于亮/暗令牌与不同壁纸下的人工走查;「菜单收起自检」以断言回归菜单项
+     点击收起路径(1.1.2 修复回归);窗口尺寸/拖动等 Rust 行为一律 noop。 -->
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -37,6 +38,9 @@
       .controls button:hover { background: rgba(255, 255, 255, 0.3); }
       .hint { position: fixed; left: 12px; bottom: 12px; color: rgba(255, 255, 255, 0.85);
         font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+      .selftest { position: fixed; left: 12px; bottom: 34px; color: #fff; font-size: 12px;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+      .selftest[data-fail="1"] { color: #ffd7d9; font-weight: 600; }
     </style>
   </head>
   <body>
@@ -47,7 +51,9 @@
       <button id="btn-theme">暗色令牌</button>
       <button id="btn-wall">换壁纸</button>
       <button id="btn-menu">模拟右键</button>
+      <button id="btn-selftest">菜单收起自检</button>
     </div>
+    <div class="selftest" id="selftest-result" data-fail=""></div>
     <div class="hint">球窗夹具:球体 + 右键菜单走查(窗口扩缩/拖动为 noop)</div>
     <script type="module">
       // ---- 最小 pv 桥:内存 kv + 罐头用量响应(与 preview/mock-core.ts 同形) ----
@@ -191,6 +197,69 @@
         const wrap = document.querySelector(".pv-tm-wrap");
         if (wrap) {
           wrap.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+        }
+      });
+
+      // ---- 回归自检:菜单项点击必须收起菜单并缩回 84×84 ----
+      // 1.1.0/1.1.1 的 closeTmMenu() 裸调用缺 wrap 实参曾静默 early-return,
+      // 菜单项点击收不起(仅 blur 可收);1.1.2 修复回归,backlog 有案。
+      function waitFor(cond, timeoutMs) {
+        return new Promise(function (resolve, reject) {
+          const t0 = Date.now();
+          (function poll() {
+            let ok;
+            try { ok = cond(); } catch (e) { reject(e); return; }
+            if (ok) { resolve(); return; }
+            if (Date.now() - t0 > timeoutMs) { reject(new Error("waitFor 超时")); return; }
+            setTimeout(poll, 30);
+          })();
+        });
+      }
+
+      document.getElementById("btn-selftest").addEventListener("click", async function () {
+        const banner = document.getElementById("selftest-result");
+        const checks = [];
+        const resizes = [];
+        const prevResize = bridge.window.resize;
+        // 记录 resize 调用:扩窗应 > 84,收起应回到 84×84
+        bridge.window.resize = function (w, h) { resizes.push([w, h]); return Promise.resolve(); };
+        const menuOf = () => document.querySelector(".pv-tm-menu");
+        const openMenu = async () => {
+          document.querySelector(".pv-tm-wrap")
+            .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+          // openTmMenu 同步置 hidden=false,条目经账号视图异步填充 —— 必须等条目出现
+          await waitFor(
+            () => menuOf() && !menuOf().hidden && menuOf().querySelectorAll(".pv-tm-menu-item").length > 0,
+            2000,
+          );
+        };
+        try {
+          // ① 右键展开:菜单可见 + 扩窗
+          await openMenu();
+          checks.push(["右键展开", !menuOf().hidden]);
+          checks.push(["扩窗 resize", resizes.some(([w, h]) => w > 84 && h > 84)]);
+          // ② 点击账号行(首个 = 选中行):应收起 + 缩回 84×84(曾失守路径)
+          resizes.length = 0;
+          menuOf().querySelectorAll(".pv-tm-menu-item")[0].click();
+          await waitFor(() => menuOf().hidden, 2000);
+          checks.push(["账号行点击收起", menuOf().hidden]);
+          checks.push(["缩回 84×84", resizes.some(([w, h]) => w === 84 && h === 84)]);
+          // ③ 动作行(带图标行,首个 = 立即刷新):同路径
+          await openMenu();
+          resizes.length = 0;
+          menuOf().querySelector(".pv-tm-menu-icon").closest(".pv-tm-menu-item").click();
+          await waitFor(() => menuOf().hidden, 2000);
+          checks.push(["动作行点击收起", menuOf().hidden]);
+          checks.push(["缩回 84×84(动作行)", resizes.some(([w, h]) => w === 84 && h === 84)]);
+          const failed = checks.filter(([, ok]) => !ok);
+          banner.textContent = "自检 " + (failed.length === 0 ? "全部通过" : "失败") + " — " +
+            checks.map(([name, ok]) => name + (ok ? " ✓" : " ✗")).join(" · ");
+          banner.dataset.fail = failed.length > 0 ? "1" : "";
+        } catch (e) {
+          banner.textContent = "自检异常:" + ((e && e.message) || e);
+          banner.dataset.fail = "1";
+        } finally {
+          bridge.window.resize = prevResize;
         }
       });
     </script>
