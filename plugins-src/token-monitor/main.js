@@ -655,8 +655,10 @@
         'padding:4px;box-shadow:var(--shadow-lg);}',
       '.pv-tm-menu-item{display:flex;justify-content:space-between;align-items:center;gap:12px;',
         'padding:5px 10px;border-radius:5px;font-size:12px;color:var(--text);cursor:pointer;',
-        'white-space:nowrap;}',
-      '.pv-tm-menu-item:hover{background:var(--panel-hover);}',
+        'white-space:nowrap;transition:background .12s ease;}',
+      // 悬停高亮走项目「指向项」惯用色 --accent-soft(.row.active/.option:hover 同源):
+      // --panel-hover 与菜单底色同族过淡,球窗小字号下不可辨;移出即随 :hover 还原
+      '.pv-tm-menu-item:hover{background:var(--accent-soft);}',
       '.pv-tm-menu-item .pv-tm-check{color:var(--accent);font-weight:700;}',
       '.pv-tm-menu-head{padding:5px 10px 2px;font-size:11px;font-weight:600;color:var(--muted);}',
       '.pv-tm-menu-sep{height:1px;background:var(--border);margin:4px 6px;}',
