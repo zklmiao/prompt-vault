@@ -85,6 +85,21 @@ export function parseRepoHome(url: string): {
   }
 }
 
+/** 市场图标首字母:开头拉丁词取前 2 字母(大写),否则取首个非 ASCII 字符,兜底 id 前 2 字符 */
+function marketInitials(name: string, id: string): string {
+  const latin = name.match(/[A-Za-z0-9]+/);
+  if (latin) return latin[0].slice(0, 2).toUpperCase();
+  const cjk = name.match(/[^\p{ASCII}]/u);
+  return cjk ? cjk[0] : id.slice(0, 2).toUpperCase();
+}
+
+/** 字符串 hash → tint 序号(1..10):同一插件恒定同色,跨主题/重启稳定(A6-lite) */
+function tintIndex(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return (Math.abs(h) % 10) + 1;
+}
+
 interface Props {
   showToast(text: string, kind?: "ok" | "err"): void;
   /** 权限确认/卸载确认弹层开关,供 App 的弹层守卫 */
@@ -772,8 +787,8 @@ function MarketRow({
   const installedCurrent = !!(installed && ref && installed.version === ref.version);
   return (
     <div className="ph-row market">
-      <div className="ph-market-icon">
-        <IconPlugin size={18} />
+      <div className={"ph-market-icon tint-" + tintIndex(entry.id)}>
+        {marketInitials(entry.name, entry.id)}
       </div>
       <div className="ph-row-main">
         <div className="ph-row-title">

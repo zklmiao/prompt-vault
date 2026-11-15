@@ -6,9 +6,11 @@
   --border: #e3e5ea;
   --border-strong: #c9cdd6;
   --text: #1f2329;
-  --muted: #8a9099;
-  --accent: #4f6ef2;
-  --accent-hover: #3f5ce0;
+  /* muted/accent 2026-11-15 对比度修订:#666d78 白卡 5.22:1、#3d5ddd 白卡 5.51:1
+     (原 #8a9099 3.22:1、#4f6ef2 4.33:1,12px 次要文字与 chip 文字均低于 WCAG AA 4.5:1) */
+  --muted: #666d78;
+  --accent: #3d5ddd;
+  --accent-hover: #324fc9;
   --accent-soft: #eef1ff;
   --on-accent: #ffffff;
   --danger: #d4494f;
@@ -22,6 +24,18 @@
   --toast-bg: #2c3038;
   --scroll: #d4d7de;
   --scroll-hover: #b9bec8;
+  /* A6-lite:市场图标 10 组柔和色调(bg 淡水洗 / fg 同族深色,fg 对 bg 均 ≥4.5:1)。
+     组件只按插件 id hash 选 class,颜色全部收在 token,不硬编码 */
+  --tint-1-bg: #fceaea; --tint-1-fg: #a83a40;
+  --tint-2-bg: #fdeee2; --tint-2-fg: #a05520;
+  --tint-3-bg: #faf0d4; --tint-3-fg: #82630e;
+  --tint-4-bg: #e7f4e7; --tint-4-fg: #3d7a44;
+  --tint-5-bg: #e2f2ef; --tint-5-fg: #267264;
+  --tint-6-bg: #e2f1f6; --tint-6-fg: #226a80;
+  --tint-7-bg: #e7edfb; --tint-7-fg: #3a56c0;
+  --tint-8-bg: #eaecf9; --tint-8-fg: #4a54b8;
+  --tint-9-bg: #f0eaf7; --tint-9-fg: #7a4aa0;
+  --tint-10-bg: #fbeaf1; --tint-10-fg: #a8447e;
   font-size: 14px;
 }
 
@@ -48,6 +62,16 @@
   --toast-bg: #33363e;
   --scroll: #3d414b;
   --scroll-hover: #4d525e;
+  --tint-1-bg: #3a2629; --tint-1-fg: #e08a90;
+  --tint-2-bg: #38291c; --tint-2-fg: #dda878;
+  --tint-3-bg: #363018; --tint-3-fg: #d1b75e;
+  --tint-4-bg: #22321f; --tint-4-fg: #96cd9a;
+  --tint-5-bg: #1d3230; --tint-5-fg: #7cc2b6;
+  --tint-6-bg: #1d2f36; --tint-6-fg: #7bbcd2;
+  --tint-7-bg: #232c47; --tint-7-fg: #8f9ff0;
+  --tint-8-bg: #272b47; --tint-8-fg: #9aa3f0;
+  --tint-9-bg: #312845; --tint-9-fg: #b79ae0;
+  --tint-10-bg: #372534; --tint-10-fg: #dd93c0;
 }
 
 /* ============ 基础 ============ */
@@ -380,6 +404,23 @@ textarea.mono {
 .icon-btn:hover {
   background: var(--panel-hover);
   border-color: var(--border-strong);
+}
+
+/* 键盘焦点可见性:按钮族统一 accent 焦点环(:focus-visible 仅键盘触发,不干扰鼠标)。
+   文本输入不在此列——已有 border-color 变化信号;列表行 .row 自带 offset -2px 的环 */
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.ph-seg:focus-visible,
+.chip-btn:focus-visible,
+.titlebar-btn:focus-visible,
+.link-btn:focus-visible,
+.pane-tab:focus-visible,
+.option:focus-visible,
+.ph-row-del:focus-visible,
+.sort-select:focus-visible,
+.switch input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ============ 主区两栏 ============ */
@@ -912,6 +953,8 @@ textarea.mono {
   position: fixed;
   inset: 0;
   background: var(--overlay);
+  /* A3:遮罩模糊给弹层加物理纵深;不支持时优雅降级为纯色遮罩 */
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -925,7 +968,8 @@ textarea.mono {
   max-height: calc(100vh - 80px);
   overflow-y: auto;
   background: var(--panel);
-  border: 1px solid var(--border);
+  /* accent 调和的边缘高光:暗色下弹窗轮廓更挺(亮色呈极淡冷边) */
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: 12px;
   padding: 20px 22px;
   box-shadow: var(--shadow-lg);
@@ -1169,8 +1213,12 @@ textarea.mono {
   animation: pv-toast-in 0.2s ease;
 }
 
+/* 错误 toast:soft 底 + danger 字 + 描边(与 .ph-row-error 同族)。
+   原实心 danger 底 + 白字在暗色仅 3.23:1(13px 文字需 4.5:1) */
 .toast.err {
-  background: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 @keyframes pv-toast-in {
@@ -1495,7 +1543,7 @@ mark.hl {
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-strong));
   border-radius: 14px;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
@@ -1979,6 +2027,7 @@ mark.hl {
   gap: 12px;
 }
 
+/* 市场图标:首字母 chip(无 tint class 时回退 accent 族) */
 .ph-market-icon {
   width: 38px;
   height: 38px;
@@ -1986,11 +2035,27 @@ mark.hl {
   border-radius: 9px;
   background: var(--accent-soft);
   color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
+
+/* A6-lite:按插件 id hash 取 10 组柔和色调,亮暗两套 token 自动跟随主题 */
+.ph-market-icon.tint-1 { background: var(--tint-1-bg); color: var(--tint-1-fg); }
+.ph-market-icon.tint-2 { background: var(--tint-2-bg); color: var(--tint-2-fg); }
+.ph-market-icon.tint-3 { background: var(--tint-3-bg); color: var(--tint-3-fg); }
+.ph-market-icon.tint-4 { background: var(--tint-4-bg); color: var(--tint-4-fg); }
+.ph-market-icon.tint-5 { background: var(--tint-5-bg); color: var(--tint-5-fg); }
+.ph-market-icon.tint-6 { background: var(--tint-6-bg); color: var(--tint-6-fg); }
+.ph-market-icon.tint-7 { background: var(--tint-7-bg); color: var(--tint-7-fg); }
+.ph-market-icon.tint-8 { background: var(--tint-8-bg); color: var(--tint-8-fg); }
+.ph-market-icon.tint-9 { background: var(--tint-9-bg); color: var(--tint-9-fg); }
+.ph-market-icon.tint-10 { background: var(--tint-10-bg); color: var(--tint-10-fg); }
 
 .ph-row-desc {
   font-size: 12px;

@@ -59,10 +59,10 @@
 
 - [ ] **A1 搜索命中片段 + 高亮**(主窗口):标题命中高亮;正文命中时行下加一行片段;与 S1 共用匹配器。
 - [ ] **A2 复制按钮 morph**:复制成功后图标 copy→✓ 1.2s 复原(目前无 IconCheck)。
-- [ ] **A3 遮罩模糊**:`.overlay` 增加 `backdrop-filter: blur(8px)`,配合现有淡入。
+- [x] **A3 遮罩模糊**:`.overlay` 增加 `backdrop-filter: blur(8px)`,配合现有淡入。已落地(2026-11-15,P1/P2 打磨初稿):`.overlay` 加 `backdrop-filter: blur(8px)`(不支持时降级纯色遮罩);同时给 `.modal`/`.palette` 补 accent 18% 调和的高光描边,暗色下弹窗轮廓更挺。
 - [x] **A4 列表→详情级联淡入**:详情内容按 20ms 阶梯淡入(纯 CSS animation-delay)。已修复 `1b1fffd`:视图分支 `.detail-inner.stagger` + `key={item.id}` 重放,20ms 阶梯 / 260ms ease;编辑与空态不参与;`prefers-reduced-motion` 下动画延迟归零。
 - [ ] **A5 列表右键菜单**:复制 / 编辑 / 置顶 / 移入回收站 / 导出此条。
-- [ ] **A6 标签稳定配色**:tag 字符串 hash → 8–12 个柔和色相,light/dark 两套 alpha;列表与详情同 tag 同色。
+- [ ] **A6 标签稳定配色**:tag 字符串 hash → 8–12 个柔和色相,light/dark 两套 alpha;列表与详情同 tag 同色。(2026-11-15 市场图标已先行落地 A6-lite:`--tint-1..10-bg/fg` 二十个 token + `tintIndex` hash 选色,见 `PluginHub.tsx` 的 `marketInitials`/`tintIndex`;标签本体待做,可直接复用同一套 tint token 与 hash 函数)
 - [x] **A7 首次启动引导**:空态 3 步卡片(收集 / 试占位符 / 随叫随到),可跳过;已修复 `001f362`。触发条件为「无收藏(不含回收站)且未置位 localStorage `pv-onboarded`」;任意新建保存成功也置位;示例条目带「示例」标签与「引导示例」来源;热键从配置动态读取;`?empty=1` 预览夹具可复现空态;窄窗(≤980px)单列堆叠。
 - [x] **A8 主窗口键盘闭环**:主列表 ↑↓/Home/End 选择(clamp 不循环)、Enter 复制活动项(无活动项先选中首条不复制)、Ctrl+E 编辑(回收站 no-op)、Space 勾选、Esc 分层退出(编辑态退出并回焦搜索 / 清多选);搜索框 combobox 语义(aria-activedescendant)+ 列表 listbox/roving tabindex + 滚动跟随;IME 与弹层守卫;排序下拉聚焦时 Esc 不再误清多选;零新增常驻 UI。提交 `162b760`。
 - [x] **导入合并预览**(新增/更新计数)——已有。
