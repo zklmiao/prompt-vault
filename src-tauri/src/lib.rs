@@ -595,6 +595,9 @@ pub fn run() {
         )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        // 插件系统通知(pv.notify 的 Rust 侧):通知经 Rust API 发送,不经其
+        // JS 命令,capabilities 零改动
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             get_data_path,
             set_data_path,
@@ -632,6 +635,7 @@ pub fn run() {
             plugins::plugin_resize_window,
             plugins::plugin_start_drag,
             plugins::plugin_show_main_panel,
+            plugins::plugin_notify,
             i18n::i18n_locales,
             i18n::i18n_locale_file
         ])

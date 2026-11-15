@@ -24,6 +24,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
+# 插件系统通知(pv.notify):Rust API 发送,不经其 JS 命令,capabilities 零改动
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

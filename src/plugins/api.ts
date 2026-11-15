@@ -71,6 +71,11 @@ export const pluginCloseWindow = (id: string): Promise<void> =>
 export const pluginShowMainPanel = (id: string): Promise<void> =>
   invoke("plugin_show_main_panel", { pluginId: id });
 
+/** 插件系统通知(Windows 通知中心;Rust 侧校验调用者插件窗口 + notify 权限,
+ *  plugin_id 由调用者窗口 label 推导,无 pluginId 参数可传) */
+export const pluginNotify = (title: string, body: string): Promise<void> =>
+  invoke("plugin_notify", { title, body });
+
 /** 调整插件窗口尺寸(逻辑像素;球窗右键菜单临时扩窗用,收起后由插件恢复) */
 export const pluginResizeWindow = (
   id: string,

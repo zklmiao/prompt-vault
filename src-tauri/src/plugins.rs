@@ -1028,6 +1028,18 @@ pub(crate) fn ensure_caller_self_or_main(
     }
 }
 
+/// 仅插件窗口放行(main 不放行):通知是插件专属副作用通道,宿主自身不发
+/// 「插件通知」。返回剥前缀后的 plugin_id(credential_configured 的 label 剥
+/// 前缀先例 —— 插件窗口 label 由宿主以 pv-plugin-<id> 创建,无歧义;id 来自
+/// 调用者自身 label 而非可传参数,A 插件窗口无法借此冒充 B 插件)。
+pub(crate) fn ensure_caller_plugin_window(caller_label: &str) -> Result<String, String> {
+    caller_label
+        .strip_prefix(PLUGIN_WINDOW_PREFIX)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "该命令仅限插件窗口调用".to_string())
+}
+
 /* ---------- 命令 ---------- */
 
 /// 拉取激活源的插件清单(host 仅 gitea 平台使用;四平台 ref 回退见 refs_to_try)。
@@ -1518,6 +1530,47 @@ fn plugin_close_window_with(app: tauri::AppHandle, plugin_id: String) -> Result<
         }
     }
     Ok(())
+}
+
+/* ---------- 插件系统通知(pv.notify 的 Rust 侧) ---------- */
+
+/// 通知标题友好截断上限(字符数;非安全边界,仅为系统通知弹窗可读性)
+const NOTIFY_TITLE_MAX_CHARS: usize = 100;
+/// 通知正文友好截断上限(字符数;非安全边界,仅为系统通知弹窗可读性)
+const NOTIFY_BODY_MAX_CHARS: usize = 300;
+
+/// 按字符数截断(char 计,不切 UTF-8 多字节;非安全边界 —— 上限只为弹窗可读性,
+/// 不承担注入/长度攻击防护,那是权限校验与系统通知管线的职责)
+fn truncate_chars(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
+/// 插件系统通知(Windows 通知中心):仅插件窗口可调,plugin_id 由调用者 label
+/// 剥前缀推导(不可传参冒充,main 不放行);permissions 安装时快照须含 "notify"。
+/// 通知经 tauri-plugin-notification 的 Rust API 发送,不经其 JS 命令,
+/// capabilities 零改动(权限双层校验:桥面 manifest 快照 + 本命令层快照)。
+#[tauri::command]
+pub fn plugin_notify(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    let plugin_id = ensure_caller_plugin_window(window.label())?;
+    let permissions = crate::net::permissions_for(&plugin_id)?;
+    if !permissions.iter().any(|p| p == "notify") {
+        return Err("插件未声明通知权限".to_string());
+    }
+    // 友好截断(校验后、发送前):系统通知弹窗承载有限,超长文案就地截断
+    let title = truncate_chars(&title, NOTIFY_TITLE_MAX_CHARS);
+    let body = truncate_chars(&body, NOTIFY_BODY_MAX_CHARS);
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show()
+        .map_err(|e| format!("通知发送失败:{e}"))
 }
 
 /* ---------- 球窗位置持久化(Rust 独占写,插件 JS 不感知) ---------- */
@@ -2501,6 +2554,46 @@ mod tests {
         let qp = "quickpick";
         let qp_id = qp.strip_prefix(PLUGIN_WINDOW_PREFIX).unwrap_or("");
         assert!(ensure_caller_self_or_main(qp, qp_id).is_err(), "退化形:非插件窗口拒绝");
+    }
+
+    /* ---- 通知通道(caller 三态 + 友好截断) ---- */
+
+    #[test]
+    fn caller_plugin_window_three_states() {
+        // ① 插件窗口放行:剥前缀得 plugin_id
+        assert_eq!(
+            ensure_caller_plugin_window("pv-plugin-token-monitor").unwrap(),
+            "token-monitor",
+            "插件窗口应放行且 id 剥前缀无歧义"
+        );
+        // ② main 拒绝:通知是插件专属通道,宿主不发「插件通知」
+        assert!(ensure_caller_plugin_window(crate::MAIN_LABEL).is_err(), "main 不放行");
+        // ③ 其他窗口一律拒绝(quickpick / 空串 / 前缀形近 / 大小写变体 / 裸前缀)
+        for bad in ["quickpick", "", "pv-plugin-", "pv-plugin", "pv-Plugin-token-monitor"] {
+            assert!(ensure_caller_plugin_window(bad).is_err(), "「{bad}」应被拒绝");
+        }
+        // 拒绝消息可读
+        let err = ensure_caller_plugin_window("main").unwrap_err();
+        assert!(err.contains("仅限插件窗口调用"), "拒绝消息应可读:{err}");
+    }
+
+    #[test]
+    fn truncate_chars_boundary_and_multibyte() {
+        // 恰等于上限:原样返回
+        let s100 = "a".repeat(100);
+        assert_eq!(truncate_chars(&s100, 100), s100);
+        // 超限一个字符:截到上限
+        let s101 = "a".repeat(101);
+        assert_eq!(truncate_chars(&s101, 100).chars().count(), 100);
+        // 多字节按 char 计:30 个汉字截到 20,不切出非法 UTF-8
+        let cn: String = "警".repeat(30);
+        assert_eq!(truncate_chars(&cn, 20), "警".repeat(20));
+        // 正文上限 300 同理
+        let s300 = "b".repeat(300);
+        assert_eq!(truncate_chars(&s300, 300), s300);
+        assert_eq!(truncate_chars(&"b".repeat(301), 300).chars().count(), 300);
+        // 空串无害
+        assert_eq!(truncate_chars("", 100), "");
     }
 
     /* ---- 契约样例(三方共用,写端断言) ---- */

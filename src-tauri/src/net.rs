@@ -99,6 +99,27 @@ fn load_permissions(plugin_id: &str) -> Result<Vec<String>, String> {
     extract_permissions(&raw, plugin_id)
 }
 
+/// 通知等非联网通道的「权限清单缺失」错误(中性措辞;联网通道的错误消息
+/// PERM_NET_MSG 被单测精确断言,不可复用挪作他意)
+const PERM_MISSING_MSG: &str = "插件未安装或无权限清单";
+
+/// 中性权限助手:读 plugins.json(既有 plugins_file_path)取
+/// `installed[<plugin_id>].permissions` 安装时快照,供通知等非联网通道判定。
+/// 解析复用 extract_permissions(其错误消息被单测精确断言,不可改动),
+/// 失败在此统一转中性消息:文件缺失 / 解析失败 / 条目缺失 / permissions 缺失
+/// 一律 Err(白名单收紧语义,缺数据时宁可拒绝)。
+pub(crate) fn permissions_for(plugin_id: &str) -> Result<Vec<String>, String> {
+    let raw = std::fs::read_to_string(plugins_file_path())
+        .map_err(|_| PERM_MISSING_MSG.to_string())?;
+    permissions_from_snapshot(&raw, plugin_id)
+}
+
+/// permissions_for 的纯解析体(与 IO 解耦,fixture 单测直测):委托
+/// extract_permissions 解析,错误消息统一中性化
+fn permissions_from_snapshot(raw: &str, plugin_id: &str) -> Result<Vec<String>, String> {
+    extract_permissions(raw, plugin_id).map_err(|_| PERM_MISSING_MSG.to_string())
+}
+
 /// `net:<host>` 权限串精确比对 host(大小写不敏感,子域名不算匹配)
 fn host_allowed(permissions: &[String], host: &str) -> bool {
     let host = host.to_lowercase();
@@ -844,6 +865,23 @@ mod tests {
         )
         .unwrap();
         assert!(!host_allowed(&perms, "open.bigmodel.cn"));
+    }
+
+    /// 通知通道权限助手(permissions_for 的纯解析体,错误消息中性):
+    /// 含 notify → Ok 且可命中;不含 notify → Ok(拒绝判定在命令层);
+    /// 条目缺失 / 坏 JSON → 统一中性错误,与联网通道「网络权限」措辞分离
+    #[test]
+    fn permissions_for_notify_gate_fixtures() {
+        let raw = r#"{"installed": {"token-monitor": {"permissions": ["net:open.bigmodel.cn", "notify", "credential:glm"]}}}"#;
+        let perms = permissions_from_snapshot(raw, "token-monitor").unwrap();
+        assert!(perms.iter().any(|p| p == "notify"), "含 notify 应可命中");
+        let raw_no = r#"{"installed": {"token-monitor": {"permissions": ["net:open.bigmodel.cn"]}}}"#;
+        let perms = permissions_from_snapshot(raw_no, "token-monitor").unwrap();
+        assert!(!perms.iter().any(|p| p == "notify"), "不含 notify 应如实返回");
+        for raw in [r#"{"installed": {}}"#, "{ not json"] {
+            let err = permissions_from_snapshot(raw, "token-monitor").unwrap_err();
+            assert_eq!(err, "插件未安装或无权限清单", "raw = {raw}");
+        }
     }
 
     #[test]

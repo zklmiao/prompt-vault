@@ -11,6 +11,7 @@ import {
   pluginCredentialSet,
   pluginCloseWindow,
   pluginNetFetch,
+  pluginNotify,
   pluginResizeWindow,
   pluginShowMainPanel,
 } from "./api";
@@ -86,6 +87,9 @@ export interface PvBridge {
   net: {
     fetch(url: string, opts?: PvNetOpts): Promise<PvNetResponse>;
   };
+  /** 发送系统通知(Windows 通知中心);仅当 manifest 声明 "notify"(fail-closed,
+   *  与 credential/net 同模式;Rust 侧另有调用者插件窗口 + 权限快照的双闸) */
+  notify(title: string, body: string): Promise<void>;
   storage: {
     get(key: string): Promise<unknown>;
     set(key: string, value: unknown): Promise<void>;
@@ -190,6 +194,12 @@ export function createBridge(pluginId: string, manifest: PluginManifest | null):
       async fetch(url, opts): Promise<PvNetResponse> {
         return pluginNetFetch(pluginId, url, opts);
       },
+    },
+    async notify(title, body): Promise<void> {
+      if (!hasPermission("notify")) {
+        throw new Error("插件未声明通知权限");
+      }
+      await pluginNotify(title, body);
     },
     storage: {
       async get(key): Promise<unknown> {
