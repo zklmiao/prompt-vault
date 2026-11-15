@@ -3010,9 +3010,11 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
+ "tauri-winrt-notification",
  "ureq",
  "url",
  "uuid",
+ "windows",
  "windows-sys 0.59.0",
  "zip",
 ]

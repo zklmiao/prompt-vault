@@ -1561,6 +1561,9 @@ pub fn plugin_notify(
     if !permissions.iter().any(|p| p == "notify") {
         return Err("插件未声明通知权限".to_string());
     }
+    // 便携版通知可达性:确保 AUMID 快捷方式存在,失败即报错(插件侧按「宁重勿漏」
+    // 于下次取数重试,且不写去重状态)
+    ensure_aumid_shortcut(app.config().identifier.as_str())?;
     // 友好截断(校验后、发送前):系统通知弹窗承载有限,超长文案就地截断
     let title = truncate_chars(&title, NOTIFY_TITLE_MAX_CHARS);
     let body = truncate_chars(&body, NOTIFY_BODY_MAX_CHARS);
@@ -1571,6 +1574,114 @@ pub fn plugin_notify(
         .body(&body)
         .show()
         .map_err(|e| format!("通知发送失败:{e}"))
+}
+
+/* ---------- 便携版通知可达性(开始菜单 AUMID 快捷方式) ---------- */
+
+/// AUMID 快捷方式的文件名(Windows 通知平台按 AUMID 查此快捷方式决定投递)
+#[cfg(windows)]
+const AUMID_SHORTCUT_NAME: &str = "Prompt Vault.lnk";
+/// 并发互斥:多个插件窗口同时 notify 时避免并发写同一 .lnk(覆盖写竞态防损坏)
+#[cfg(windows)]
+static AUMID_SHORTCUT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 确保「开始菜单\程序」下存在 AppUserModelID = app_id 的快捷方式(每次调用覆盖写,
+/// 兼容便携 exe 任意挪动;用户可写目录无需管理员)。
+///
+/// 背景(2026-11-15 排查):WinRT 通知 `CreateToastNotifierWithId(app_id)` 要求
+/// AUMID 对应一个已注册的开始菜单快捷方式 —— NSIS 安装版由安装器创建,便携版
+/// 裸跑没有 → 通知被 Windows **静默丢弃**而 `show()` 仍返回 Ok,插件侧误判已
+/// 送达并写去重状态,整个 5h 窗口不再重试(红点有、消息始终无)。token-monitor
+/// 告警通知即栽在此处。快捷方式指向当前 exe,NSIS 安装版共存时同 AUMID 切换
+/// target,投递不受影响。
+#[cfg(windows)]
+pub(crate) fn ensure_aumid_shortcut(app_id: &str) -> Result<(), String> {
+    use windows::core::{HSTRING, Interface, PWSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoTaskMemAlloc, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PROPVARIANT};
+    use windows::Win32::System::Variant::VT_LPWSTR;
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PSGetPropertyKeyFromName};
+
+    let _guard = AUMID_SHORTCUT_LOCK.lock().map_err(|e| format!("AUMID 锁中毒:{e}"))?;
+
+    // 目标:开始菜单\程序\Prompt Vault.lnk → 当前 exe(可写目录,无需管理员)
+    let appdata = std::env::var("APPDATA").map_err(|_| "无法读取 APPDATA 环境变量".to_string())?;
+    let programs_dir = std::path::PathBuf::from(appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs");
+    std::fs::create_dir_all(&programs_dir).map_err(|e| format!("创建开始菜单目录失败:{e}"))?;
+    let lnk_path = programs_dir.join(AUMID_SHORTCUT_NAME);
+    let exe_path = std::env::current_exe().map_err(|e| format!("读取当前 exe 路径失败:{e}"))?;
+
+    unsafe {
+        // COM 就绪:S_FALSE(本线程已初始化)与 RPC_E_CHANGED_MODE(线程已是其他
+        // 套间,COM 仍可用)都可容忍;其余错误放弃本次,下次通知重试
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if hr.is_err() && hr != windows::core::HRESULT(0x8001_0106_u32 as i32) {
+            return Err(format!("COM 初始化失败:{hr:?}"));
+        }
+
+        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| format!("创建 ShellLink 失败:{e}"))?;
+        let exe_hs = HSTRING::from(exe_path.as_os_str());
+        link.SetPath(&exe_hs)
+            .map_err(|e| format!("设置快捷方式目标失败:{e}"))?;
+        link.SetIconLocation(&exe_hs, 0)
+            .map_err(|e| format!("设置快捷方式图标失败:{e}"))?;
+        if let Some(parent) = exe_path.parent() {
+            link.SetWorkingDirectory(&HSTRING::from(parent.as_os_str()))
+                .map_err(|e| format!("设置快捷方式工作目录失败:{e}"))?;
+        }
+        link.SetDescription(&HSTRING::from("Prompt Vault 本地 Prompt 收藏工具"))
+            .map_err(|e| format!("设置快捷方式描述失败:{e}"))?;
+
+        // PKEY_AppUserModel_ID 按属性名解析(不硬编码 GUID);值 = VT_LPWSTR,
+        // 需 CoTaskMemAlloc 缓冲(属性表契约),SetValue 内部拷贝后即清
+        let store: IPropertyStore = link.cast().map_err(|e| format!("获取属性表失败:{e}"))?;
+        let mut key = windows::Win32::Foundation::PROPERTYKEY::default();
+        PSGetPropertyKeyFromName(&HSTRING::from("System.AppUserModel.ID"), &mut key)
+            .map_err(|e| format!("解析 AppUserModelID 属性键失败:{e}"))?;
+        let wide: Vec<u16> = app_id.encode_utf16().chain(core::iter::once(0)).collect();
+        let mem = CoTaskMemAlloc(wide.len() * 2);
+        if mem.is_null() {
+            return Err("CoTaskMemAlloc 失败".to_string());
+        }
+        core::ptr::copy_nonoverlapping(wide.as_ptr(), mem.cast::<u16>(), wide.len());
+        let mut prop = PROPVARIANT::default();
+        // union 字段写入:整结构体赋值(零值旧内容无自有资源,覆写安全)
+        *prop.Anonymous.Anonymous = windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0 {
+            vt: VT_LPWSTR,
+            wReserved1: 0,
+            wReserved2: 0,
+            wReserved3: 0,
+            Anonymous: windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0_0 {
+                pwszVal: PWSTR::from_raw(mem.cast::<u16>()),
+            },
+        };
+        let set_result = store.SetValue(&key, &prop);
+        let _ = PropVariantClear(&mut prop); // SetValue 已拷贝,就地释放缓冲
+        set_result.map_err(|e| format!("写入 AUMID 属性失败:{e}"))?;
+        store.Commit().map_err(|e| format!("提交 AUMID 属性失败:{e}"))?;
+
+        let lnk_hs = HSTRING::from(lnk_path.as_os_str());
+        let persist: IPersistFile = link.cast().map_err(|e| format!("获取 IPersistFile 失败:{e}"))?;
+        persist
+            .Save(&lnk_hs, true)
+            .map_err(|e| format!("保存快捷方式失败:{e}"))?;
+    }
+    Ok(())
+}
+
+/// 非 Windows 平台:通知走系统原生通道,无需快捷方式
+#[cfg(not(windows))]
+pub(crate) fn ensure_aumid_shortcut(_app_id: &str) -> Result<(), String> {
+    Ok(())
 }
 
 /* ---------- 球窗位置持久化(Rust 独占写,插件 JS 不感知) ---------- */
@@ -1682,6 +1793,42 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         PluginRoot(dir)
+    }
+
+    /// AUMID 快捷方式端到端:真实走一遍 COM(IShellLink + 属性表 + IPersistFile),
+    /// 验证开始菜单 .lnk 生成后清理(便携版通知可达性的关键路径)
+    #[test]
+    #[cfg(windows)]
+    fn aumid_shortcut_creates_lnk() {
+        ensure_aumid_shortcut("com.zklmiao.prompt-vault")
+            .expect("AUMID 快捷方式创建应成功");
+        let lnk = std::env::var("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap()
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs")
+            .join(AUMID_SHORTCUT_NAME);
+        assert!(lnk.exists(), "快捷方式应已生成:{}", lnk.display());
+        std::fs::remove_file(&lnk).expect("测试清理应成功");
+    }
+
+    /// 人工确认测试:与 tauri-plugin-notification 同一后端(tauri-winrt-notification),
+    /// 同一 AUMID,发一条真实弹窗 —— 需要人眼确认横幅是否显示(后端对「静默丢弃」
+    /// 与「真实显示」都返回 Ok,机器无法区分,这正是本次 bug 的根源)。
+    /// 会在屏幕弹真窗,默认忽略;手动跑:cargo test toast_user_visible_confirmation -- --ignored
+    #[test]
+    #[cfg(windows)]
+    #[ignore]
+    fn toast_user_visible_confirmation() {
+        ensure_aumid_shortcut("com.zklmiao.prompt-vault").expect("AUMID 快捷方式创建应成功");
+        use tauri_winrt_notification::Toast;
+        Toast::new("com.zklmiao.prompt-vault")
+            .title("Prompt Vault 通知测试")
+            .text1("如果你看到这条弹窗,Windows 通知链路已打通")
+            .show()
+            .expect("toast show 应成功");
     }
 
     /// 测试 zip 构造器:条目为 (name, content);symlink 条目为 (name, target)

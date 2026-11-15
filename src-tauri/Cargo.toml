@@ -42,6 +42,21 @@ url = "2"
 # 插件包解压(default-features=false,仅 deflate;zip-slip 防护与软链检测在本仓库内实现)
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
+# Windows 便携版通知可达性:创建带 AUMID 的开始菜单快捷方式(见 plugins.rs
+# ensure_aumid_shortcut)。0.62 与 tauri 依赖树同版本,不增加重复编译
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_PropertiesSystem",
+] }
+
+# 仅测试:直接驱动通知后端发真实弹窗,人工确认显示链路
+[target.'cfg(windows)'.dev-dependencies]
+tauri-winrt-notification = "0.8"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
