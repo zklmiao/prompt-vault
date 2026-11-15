@@ -108,6 +108,7 @@
 
 ### v2(已定,不承诺时间)
 
+- [ ] 悬浮球用量告警(UI 已落地,通知/状态机/跨窗同步待功能卡;设计定稿 `docs/designs/token-monitor-alert-ui.md`,存储键 `tm.alert.<provider>:<label>` 按账号粒度)
 - [ ] Claude(本地 `~/.claude/projects/**.jsonl` 统计 5h 窗口)、Codex(只读 `~/.codex/auth.json` OAuth + backend API)
 - [ ] 百炼、KiloPass(社区逆向端点,卡片标注「非官方接口,可能失效」)
 - [ ] 每供应商多账号 / MCP 标签过滤暴露 / 语言包扩展 / 第三方源签名评估

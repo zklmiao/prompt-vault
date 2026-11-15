@@ -47,7 +47,9 @@
  *   ball.poll = {enabled, intervalSec}(钳制 ≥120s,默认关);
  *   tm.accounts —— 账号清单 [{provider,label}](清单单写者=面板实例);
  *   cache:<provider>:<label> —— 每账号最近一次成功数据 + fetchedAt,失败不覆盖;
- *     label "default" 读取回落旧 cache:<provider>(旧单账号缓存兼容)。
+ *     label "default" 读取回落旧 cache:<provider>(旧单账号缓存兼容);
+ *   tm.alert.<provider>:<label> —— 每账号告警阈值 {enabled,threshold}
+ *     (键按账号 scope;单写者=面板实例,球实例只读;删除账号后键残留不清理)。
  */
 
   // ============ 常量:五家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
@@ -418,10 +420,14 @@
   var KV_POLL = 'ball.poll';
   var KV_ACCOUNTS = 'tm.accounts';    // 账号清单(单写者=面板实例)
   var KV_CACHE_PREFIX = 'cache:';
+  var KV_ALERT_PREFIX = 'tm.alert.';  // 告警阈值配置,键 = 前缀 + 账号 scope(单写者=面板实例)
   var BALL_SIZE = 84;             // 球窗边长(与设计 §5.1 一致)
   var MENU_WIDTH = 172;           // 右键菜单宽度
   var POLL_MIN_SEC = 120;         // 轮询间隔下限(参照社区 statusline 120s 缓存实践)
   var POLL_DEFAULT_SEC = 300;     // 开启轮询且未指定间隔时的默认值
+  var ALERT_MIN = 5;              // 阈值滑杆下限(%)
+  var ALERT_MAX = 100;            // 阈值滑杆上限(%)
+  var ALERT_DEFAULT_THRESHOLD = 80; // 无 kv 记录时的默认阈值(%)
 
   // ---------- 微型 i18n:zh 默认 + en;窗口语言创建时定格(批次 2 已知限制) ----------
 
@@ -457,6 +463,11 @@
       keyRequired: 'Key 不能为空',
       akSkRequired: 'AK 与 SK 均不能为空',
       addOk: '账号已添加',
+      alertGroup: '告警阈值 · 5 小时窗口',
+      alertChip: '已超阈值',
+      alertTooltip: '已超阈值 {n}%',
+      alertSwitch: '{label} 阈值告警开关',
+      alertSlider: '{label} 告警阈值滑杆',
       pollLabel: '自动轮询(球窗常驻刷新)',
       pollInterval: '间隔(秒,≥120)',
       credFail: '凭据操作失败:',
@@ -493,6 +504,11 @@
       keyRequired: 'Key is required',
       akSkRequired: 'Both AK and SK are required',
       addOk: 'Account added',
+      alertGroup: 'Alert threshold · 5h window',
+      alertChip: 'Over threshold',
+      alertTooltip: 'Over threshold {n}%',
+      alertSwitch: '{label} threshold alert switch',
+      alertSlider: '{label} alert threshold slider',
       pollLabel: 'Auto poll (ball refresh)',
       pollInterval: 'Interval (sec, ≥120)',
       credFail: 'Credential operation failed: ',
@@ -583,6 +599,13 @@
     '<path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>' +
     '<path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>' +
     '<line x1="2" y1="2" x2="22" y2="22"/></svg>';
+  var ICON_BELL =
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>' +
+    '<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>' +
+    '<path d="M4 2C2.8 2.6 2 3.9 2 5.4"/>' +
+    '<path d="M20 2c1.2.6 2 1.9 2 3.4"/></svg>';
 
   /** 拉取并写缓存:成功刷新该账号缓存(带 fetchedAt),失败不覆盖上次成功 cache */
   function fetchAndCache(account) {
@@ -604,6 +627,29 @@
         return old && typeof old === 'object' ? old : null;
       });
     }).catch(function () { return null; });
+  }
+
+  /** 读该账号告警阈值配置 tm.alert.<scope>:缺省/纠偏回 {enabled:false, threshold:80}。
+   *  双实例皆只读本函数;写入仅面板实例(单写者,与 tm.accounts 约定一致),球实例只读 */
+  function readAlertCfg(account) {
+    return pv.storage.get(KV_ALERT_PREFIX + accountScope(account)).then(function (cfg) {
+      if (!cfg || typeof cfg !== 'object') {
+        return { enabled: false, threshold: ALERT_DEFAULT_THRESHOLD };
+      }
+      var thr = numOrNull(cfg.threshold);
+      if (thr === null) thr = ALERT_DEFAULT_THRESHOLD;
+      thr = Math.min(ALERT_MAX, Math.max(ALERT_MIN, Math.round(thr)));
+      return { enabled: cfg.enabled === true, threshold: thr };
+    }).catch(function () {
+      return { enabled: false, threshold: ALERT_DEFAULT_THRESHOLD };
+    });
+  }
+
+  /** 告警派生(纯 UI 派生,不持久化告警事件):开关开 && 未被错误/空态阻断 && pct ≥ 阈值。
+   *  pct 取该账号 fiveHour.percent(可为 null);blocked 由调用方传(球=错误/空态,卡=取数错误) */
+  function isAlerting(cfg, pct, blocked) {
+    if (!cfg || cfg.enabled !== true || blocked) return false;
+    return pct !== null && pct !== undefined && pct >= cfg.threshold;
   }
 
   function tmEl(tag, className, text) {
@@ -810,7 +856,40 @@
         'border-radius:50%;background:var(--panel);transition:transform .15s ease;}',
       '.pv-tm-switch input:checked + span{background:var(--accent);}',
       '.pv-tm-switch input:checked + span::before{transform:translateX(15px);}',
-      '.pv-tm-poll-row .input{width:84px;margin-left:auto;flex:none;}'
+      '.pv-tm-poll-row .input{width:84px;margin-left:auto;flex:none;}',
+      // 告警阈值行:每账号一行 [缩写 chip | switch | 滑杆 4px 轨道 14px thumb | 数值];
+      // 关闭态整行 opacity .45、滑杆不可交互(视觉规格见设计稿 §3)
+      '.pv-tm-alert-list{display:flex;flex-direction:column;gap:8px;}',
+      '.pv-tm-alert-row{display:flex;align-items:center;gap:8px;font-size:12px;}',
+      '.pv-tm-alert-chip{flex-shrink:0;width:44px;text-align:center;font-size:11px;font-weight:600;',
+        'color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:3px 0;}',
+      '.pv-tm-alert-chip sup{font-size:8px;font-weight:600;margin-left:1px;}',
+      '.pv-tm-slider{flex:1;min-width:100px;height:4px;border-radius:999px;',
+        '-webkit-appearance:none;appearance:none;outline-offset:2px;cursor:pointer;',
+        'background:var(--border-strong);border:none;padding:0;margin:0;}',
+      '.pv-tm-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;',
+        'width:14px;height:14px;border-radius:999px;background:var(--panel);',
+        'border:2px solid var(--border-strong);}',
+      '.pv-tm-slider:disabled{cursor:default;}',
+      '.pv-tm-alert-val{flex-shrink:0;width:38px;text-align:right;font-size:12px;font-weight:600;',
+        'color:var(--text);font-variant-numeric:tabular-nums;}',
+      '.pv-tm-alert-row.pv-tm-alert-off{opacity:.45;}',
+      '.pv-tm-alert-row.pv-tm-alert-off .pv-tm-slider{pointer-events:none;}',
+      '.pv-tm-alert-row.pv-tm-alert-off .pv-tm-alert-val{color:var(--muted);font-weight:400;}',
+      // 卡片告警胶囊:danger-soft 底 + danger 字 + 小铃铛,999px 圆角(设计稿 §3)
+      '.pv-tm-card-alert{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;',
+        'background:var(--danger-soft);color:var(--danger);border-radius:999px;',
+        'padding:3px 9px;font-size:11px;font-weight:600;white-space:nowrap;}',
+      // 球告警态:脉冲图层常驻 DOM(默认 opacity 0,告警态 2.4s 呼吸;reduced-motion 降级
+      // 静态外圈)+ 右上角徽标(containing block = .pv-tm-ball 自身定位)
+      '.pv-tm-pulse{opacity:0;transform-origin:38px 38px;}',
+      '.pv-tm-ball.pv-tm-alerting .pv-tm-pulse{animation:pv-tm-pulse 2.4s ease-in-out infinite;}',
+      '@keyframes pv-tm-pulse{0%,100%{opacity:.16;transform:scale(1);}50%{opacity:.5;transform:scale(1.07);}}',
+      '@media (prefers-reduced-motion: reduce){',
+        '.pv-tm-ball.pv-tm-alerting .pv-tm-pulse{animation:none;opacity:.32;}}',
+      '.pv-tm-badge{display:none;position:absolute;top:2px;right:9px;width:10px;height:10px;',
+        'border-radius:999px;background:var(--danger);box-shadow:0 0 0 2px var(--panel);}',
+      '.pv-tm-ball.pv-tm-alerting .pv-tm-badge{display:block;}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -821,6 +900,7 @@
   var ballData = null;       // 当前账号最近一次成功数据(cache 或本次拉取)
   var ballError = null;      // 最近一次取数错误摘要
   var ballNoConfigured = false; // 无已配置账号的灰态
+  var ballAlertCfg = null;   // 当前账号告警阈值配置(readAlertCfg 结果;球实例只读)
   var pollTimer = null;      // 球实例持有;面板实例不轮询
   var pollPeriodMs = 0;
 
@@ -891,14 +971,16 @@
         var selection = upgradeSelection(saved);
         var ids = accounts.map(function (a) { return accountScope(a); });
         ballAccount = ids.indexOf(selection) >= 0 ? selection : ids[0];
-        renderBall();
-        return readCache(accountOf(ballAccount, accounts)).then(function (cached) {
-          if (cached) {
-            ballData = cached;
-            renderBall();
-          }
-          return refreshBallData().then(function () {
-            startPollIfEnabled();
+        return loadBallAlertCfg().then(function () {
+          renderBall();
+          return readCache(accountOf(ballAccount, accounts)).then(function (cached) {
+            if (cached) {
+              ballData = cached;
+              renderBall();
+            }
+            return refreshBallData().then(function () {
+              startPollIfEnabled();
+            });
           });
         });
       });
@@ -919,7 +1001,9 @@
 
   /** 球体渲染:圆环 = 当前账号 5h 百分比;环底 --border、进度 --accent(≥80% --danger)、
    *  中心 abbr(国际角标 i)+ 百分比;失败态环保留最近缓存值 + 中心「!」,
-   *  tooltip 错误摘要 */
+   *  tooltip 错误摘要。告警态:SVG 最前为常驻脉冲图层(r=35,描边随环色,
+   *  零告警 opacity 0)+ svg 后常驻徽标(display:none,告警态显现);
+   *  注意 innerHTML 每次重建,脉冲/徽标必须在模板内(常驻 DOM),不能挂外部节点 */
   function renderBall() {
     var wrap = document.querySelector('.pv-tm-wrap');
     if (!wrap) return;
@@ -937,13 +1021,18 @@
     var center2 = ballError ? '!' : (pct === null ? '–' : (Math.round(pct * 100) / 100) + '%');
     ball.innerHTML =
       '<svg viewBox="0 0 76 76" width="76" height="76" aria-hidden="true">' +
+      // 常驻脉冲图层:告警态经 .pv-tm-alerting 激活 CSS 呼吸动画
+      '<circle class="pv-tm-pulse" cx="38" cy="38" r="35" fill="none" stroke="' + stroke + '" stroke-width="3"/>' +
       '<circle cx="38" cy="38" r="32" fill="none" stroke="var(--border-strong)" stroke-width="6"/>' +
       '<circle class="pv-tm-ring" cx="38" cy="38" r="32" fill="none" stroke="' + stroke + '" stroke-width="6" ' +
       'stroke-linecap="round" stroke-dasharray="' + ring + '" stroke-dashoffset="' + offset + '" transform="rotate(-90 38 38)"/>' +
       '<text class="pv-tm-abbr" x="38" y="36" text-anchor="middle">' + abbr + intl + '</text>' +
       '<text class="' + pctClass + '" x="38" y="51" text-anchor="middle">' + center2 + '</text>' +
-      '</svg>';
+      '</svg>' +
+      // 常驻徽标(display:none;containing block = .pv-tm-ball 自身已定位)
+      '<div class="pv-tm-badge"></div>';
     ball.title = buildBallTooltip();
+    applyAlertStates(ball);
   }
 
   /** scope 字符串 → 账号对象(球内部状态用;仅信任内部构造的 'provider:label') */
@@ -969,6 +1058,10 @@
         (five.resetAt ? ' · ' + formatCountdown(five.resetAt) : ''));
       lines.push(tm('weekly') + ' ' + weekPct +
         (week.resetAt ? ' · ' + formatCountdown(week.resetAt) : ''));
+    }
+    // 告警行:当前账号派生告警态时追加(title 原生文本,无样式 —— 设计稿弹层为示意)
+    if (isBallAlerting()) {
+      lines.push(tm('alertTooltip').replace('{n}', String(ballAlertCfg.threshold)));
     }
     if (ballError) {
       lines.push(tm('errPrefix') + ballError);
@@ -999,15 +1092,18 @@
     });
   }
 
-  /** 切换账号:复位状态 → 持久化('provider:label')→ 渲染缓存 → 拉新数据 */
+  /** 切换账号:复位状态 → 持久化('provider:label')→ 读新账号告警配置 → 渲染缓存 → 拉新数据 */
   function setAccount(scope, accounts) {
     var account = accountOf(scope, accounts || [parseScope(scope)].filter(Boolean));
     ballNoConfigured = false;
     ballAccount = accountScope(account);
     ballData = null;
     ballError = null;
+    ballAlertCfg = null;
     renderBall();
     pv.storage.set(KV_PROVIDER, ballAccount).catch(function () {});
+    // 账号切换时读新配置(面板写入不跨窗通知,球在切换/取数时读到 —— 已知局限,见卡)
+    loadBallAlertCfg().then(renderBall).catch(function () {});
     var proceed = readCache(account).then(function (cached) {
       if (cached) {
         ballData = cached;
@@ -1018,6 +1114,30 @@
     void proceed;
   }
 
+  /** 球读当前账号告警配置(账号切换/取数完成时刷新;写入仅面板实例,球只读) */
+  function loadBallAlertCfg() {
+    var account = ballAccount ? parseScope(ballAccount) : null;
+    if (!account) {
+      ballAlertCfg = null;
+      return Promise.resolve();
+    }
+    return readAlertCfg(account).then(function (cfg) {
+      ballAlertCfg = cfg;
+    });
+  }
+
+  /** 球当前账号告警派生:开关开 && 无错误/无空态 && 5h% ≥ 阈值(纯派生,不持久化) */
+  function isBallAlerting() {
+    if (ballError || ballNoConfigured || !ballData) return false;
+    var pct = ballData.fiveHour ? ballData.fiveHour.percent : null;
+    return isAlerting(ballAlertCfg, pct, false);
+  }
+
+  /** 球告警态 DOM:按派生结果 toggle 容器类 .pv-tm-alerting(脉冲/徽标随 CSS 显隐) */
+  function applyAlertStates(ball) {
+    ball.classList.toggle('pv-tm-alerting', isBallAlerting());
+  }
+
   /** 拉当前账号数据并渲染;失败:环保留缓存值 + 中心「!」+ tooltip 错误 */
   function refreshBallData() {
     if (!ballAccount) return Promise.resolve();
@@ -1026,6 +1146,8 @@
     return fetchAndCache(account).then(function (data) {
       ballData = data;
       ballError = null;
+      return loadBallAlertCfg(); // 下次取数时读到面板新写入的阈值配置
+    }).then(function () {
       renderBall();
     }).catch(function (err) {
       ballError = (err && err.message) || String(err);
@@ -1311,6 +1433,11 @@
       var acctList = tmEl('div', 'pv-tm-acct-list');
       settings.appendChild(acctList);
 
+      // ---- 告警阈值分组:每账号一行(chip + switch + 滑杆 + 数值;存 tm.alert.<scope>) ----
+      settings.appendChild(tmEl('div', 'pv-tm-section-title', tm('alertGroup')));
+      var alertList = tmEl('div', 'pv-tm-alert-list');
+      settings.appendChild(alertList);
+
       // ---- 轮询行:switch + 间隔(钳制 ≥120s;默认关;存 ball.poll) ----
       var pollRow = tmEl('div', 'pv-tm-poll-row');
       pollRow.appendChild(tmEl('span', 'pv-tm-poll-label', tm('pollLabel')));
@@ -1380,9 +1507,10 @@
       root.appendChild(colSide);
       el.appendChild(root);
 
-      /** 整区重渲染(账号列表 + 卡片;addStatus 保持) */
+      /** 整区重渲染(账号列表 + 告警阈值行 + 卡片;addStatus 保持) */
       function rerender() {
         renderAccountList();
+        renderAlertRows();
         renderPanelCards();
       }
 
@@ -1453,7 +1581,102 @@
         return row;
       }
 
-      /** 渲染卡片区:每账号一张卡(含未配置账号,徽标在列表区);数据渲染该账号 cache */
+      /** 告警阈值行:每账号一行;配置读写仅面板实例(单写者),球实例只读。
+       *  行重建只在账号列表变更时(rerender)—— 交互中不重建,以免打断滑杆拖动;
+       *  新增账号追加一行、删除账号行随清单消失(孤儿 kv 键不清理,清理归功能卡) */
+      function renderAlertRows() {
+        ensureAccountsMigrated().then(function (accounts) {
+          alertList.innerHTML = '';
+          if (accounts.length === 0) return;
+          Promise.all(accounts.map(readAlertCfg)).then(function (cfgs) {
+            alertList.innerHTML = '';
+            for (var i = 0; i < accounts.length; i++) {
+              alertList.appendChild(buildAlertRow(accounts[i], cfgs[i]));
+            }
+          });
+        }).catch(function () { /* kv 不可用:行保持空,不影响其他区域 */ });
+      }
+
+      /** 单行:[缩写 chip | switch | 滑杆(5–100 步进 1)| 数值%]。
+       *  持久化时机:switch 用 change;滑杆 input 仅更新数值/填充,change(松手)持久化
+       *  + blur 兜底(轮询间隔行先例 16311ab;change+blur 双触发幂等无害)。
+       *  写完即 renderPanelCards —— 卡片告警 chip 随新配置即时翻转(行本身不重建) */
+      function buildAlertRow(account, cfg) {
+        var meta = PROVIDERS[account.provider];
+        var name = (meta ? meta.label : account.provider) + ' · ' + account.label;
+        var row = tmEl('div', 'pv-tm-alert-row');
+        var chip = tmEl('span', 'pv-tm-alert-chip');
+        chip.innerHTML = (meta ? meta.abbr : '?') + (meta && meta.intl ? '<sup>i</sup>' : '');
+        chip.title = meta ? meta.endpoint : account.provider;
+        row.appendChild(chip);
+        var switchWrap = tmEl('label', 'pv-tm-switch');
+        var check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = cfg.enabled === true;
+        check.setAttribute('aria-label', tm('alertSwitch').replace('{label}', name));
+        switchWrap.appendChild(check);
+        switchWrap.appendChild(document.createElement('span'));
+        row.appendChild(switchWrap);
+        var slider = document.createElement('input');
+        slider.className = 'pv-tm-slider';
+        slider.type = 'range';
+        slider.min = String(ALERT_MIN);
+        slider.max = String(ALERT_MAX);
+        slider.step = '1';
+        slider.value = String(cfg.threshold);
+        slider.setAttribute('aria-label', tm('alertSlider').replace('{label}', name));
+        row.appendChild(slider);
+        var val = tmEl('span', 'pv-tm-alert-val', cfg.threshold + '%');
+        row.appendChild(val);
+
+        var persist = function (enabled) {
+          void pv.storage.set(KV_ALERT_PREFIX + accountScope(account), {
+            enabled: enabled === true,
+            threshold: clampThreshold(slider.value)
+          }).then(function () {
+            renderPanelCards(); // 卡片告警 chip 随新配置即时翻转
+          }).catch(function () { /* 写失败静默:下次重渲染按 kv 实际值回显 */ });
+        };
+        var applyRowState = function () {
+          var on = check.checked === true;
+          row.classList.toggle('pv-tm-alert-off', !on);
+          slider.disabled = !on;
+        };
+        check.addEventListener('change', function () {
+          applyRowState();
+          persist(check.checked);
+        });
+        slider.addEventListener('input', function () {
+          val.textContent = slider.value + '%';
+          paintSliderFill();
+        });
+        var persistSlider = function () {
+          persist(check.checked);
+        };
+        slider.addEventListener('change', persistSlider);
+        slider.addEventListener('blur', persistSlider);
+        applyRowState();
+        paintSliderFill();
+        return row;
+
+        /** 阈值钳制回滑杆区间(数值来自字符串 input,统一走 Number 纠偏) */
+        function clampThreshold(raw) {
+          var n = Number(raw);
+          if (!isFinite(n)) n = ALERT_DEFAULT_THRESHOLD;
+          return Math.min(ALERT_MAX, Math.max(ALERT_MIN, Math.round(n)));
+        }
+
+        /** 滑杆 accent 填充:inline gradient 直接引用 CSS var —— 主题切换自动跟随,
+         *  无需监听(取舍:与「getComputedStyle 快照 + 重渲染重算」等价且少一条取舍) */
+        function paintSliderFill() {
+          var pos = (Number(slider.value) - ALERT_MIN) / (ALERT_MAX - ALERT_MIN) * 100;
+          slider.style.background = 'linear-gradient(to right, var(--accent) 0%, var(--accent) ' +
+            pos + '%, var(--border-strong) ' + pos + '%, var(--border-strong) 100%)';
+        }
+      }
+
+      /** 渲染卡片区:每账号一张卡(含未配置账号,徽标在列表区);数据渲染该账号 cache,
+       *  并读该账号告警配置供卡头派生告警胶囊 */
       function renderPanelCards() {
         ensureAccountsMigrated().then(function (accounts) {
           cards.innerHTML = '';
@@ -1463,12 +1686,17 @@
             return;
           }
           refreshAllBtn.disabled = false;
-          var reads = accounts.map(function (account) { return readCache(account); });
+          var reads = accounts.map(function (account) {
+            return Promise.all([readCache(account), readAlertCfg(account)]).then(function (rs) {
+              return { data: rs[0], alert: rs[1] };
+            });
+          });
           Promise.all(reads).then(function (results) {
             cards.innerHTML = '';
             for (var i = 0; i < accounts.length; i++) {
               var scope = accountScope(accounts[i]);
-              cards.appendChild(buildCard(accounts[i], results[i], panelErrors[scope] || null));
+              cards.appendChild(buildCard(accounts[i], results[i].data,
+                panelErrors[scope] || null, results[i].alert));
             }
           });
         }).catch(function (err) {
@@ -1477,9 +1705,9 @@
         });
       }
 
-      /** 单张卡:卡头=缩写徽标+供应商名·label+端点;5h/周计量条(≥80% danger,
-       *  条下倒计时);GLM 系另附 24h 聚合 / MCP 月度双瓦片 */
-      function buildCard(account, data, errorText) {
+      /** 单张卡:卡头=缩写徽标+供应商名·label+端点(该账号派生告警态时追加告警胶囊);
+       *  5h/周计量条(≥80% danger,条下倒计时);GLM 系另附 24h 聚合 / MCP 月度双瓦片 */
+      function buildCard(account, data, errorText, alertCfg) {
         var meta = PROVIDERS[account.provider];
         var card = tmEl('div', 'pv-tm-card');
         var head = tmEl('div', 'pv-tm-card-head');
@@ -1492,6 +1720,13 @@
           (meta ? meta.label : account.provider) + ' · ' + account.label));
         titlewrap.appendChild(tmEl('div', 'pv-tm-card-sub', meta ? meta.endpoint : ''));
         head.appendChild(titlewrap);
+        // 告警胶囊:纯 UI 派生(开关开 && 无取数错误 && 5h% ≥ 阈值),不发通知
+        var fivePct = data && data.fiveHour ? data.fiveHour.percent : null;
+        if (isAlerting(alertCfg, fivePct, !!errorText)) {
+          var alertChip = tmEl('span', 'pv-tm-card-alert');
+          alertChip.innerHTML = ICON_BELL + '<span>' + tm('alertChip') + '</span>';
+          head.appendChild(alertChip);
+        }
         var refreshBtn = tmEl('button', 'btn small', tm('refreshNow'));
         refreshBtn.addEventListener('click', function () {
           refreshBtn.disabled = true;

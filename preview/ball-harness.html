@@ -2,7 +2,9 @@
 <!-- 球窗夹具:模拟 pv-plugin-token-monitor 球窗实例(预览/dev 专用,不参与构建)。
      以最小 pv 桥(内存 kv + 罐头响应)+ 真实 main.js 源码驱动球体与右键菜单,
      用于亮/暗令牌与不同壁纸下的人工走查;「菜单收起自检」以断言回归菜单项
-     点击收起路径(1.1.2 修复回归);窗口尺寸/拖动等 Rust 行为一律 noop。 -->
+     点击收起路径(1.1.2 修复回归);「告警自检」以断言回归球告警态派生链
+     (UI 卡 J:超阈值脉冲/徽标/tooltip 行 + 阈值抬高与开关关两条解除路径);
+     窗口尺寸/拖动等 Rust 行为一律 noop。 -->
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -52,6 +54,7 @@
       <button id="btn-wall">换壁纸</button>
       <button id="btn-menu">模拟右键</button>
       <button id="btn-selftest">菜单收起自检</button>
+      <button id="btn-alerttest">告警自检</button>
     </div>
     <div class="selftest" id="selftest-result" data-fail=""></div>
     <div class="hint">球窗夹具:球体 + 右键菜单走查(窗口扩缩/拖动为 noop)</div>
@@ -184,6 +187,10 @@
         pvWindowSetup.onMount(document.getElementById("ball-root"));
       }
 
+      // 人工走查钩子:暴露内存 kv —— 控制台写 tm.alert.<scope>(如 {enabled:true,threshold:20})
+      // 后点「模拟右键 → 立即刷新」,即可看到球体脉冲/徽标/tooltip 告警行
+      window.__tmHarnessKv = kv;
+
       // ---- 夹具控制:主题 / 壁纸 / 右键菜单 ----
       document.getElementById("btn-theme").addEventListener("click", function (e) {
         const dark = document.documentElement.dataset.theme !== "dark";
@@ -260,6 +267,56 @@
           banner.dataset.fail = "1";
         } finally {
           bridge.window.resize = prevResize;
+        }
+      });
+
+      // ---- 回归自检:球告警态派生链(UI 卡 J)----
+      // 写 tm.alert.glm:default → 菜单「立即刷新」(取数完成即重读配置)→
+      // 断言 .pv-tm-alerting / 常驻脉冲图层 / 徽标显隐 / tooltip 告警行;
+      // 阈值抬高与开关关闭两条解除路径同样断言(纯 UI 派生,不发通知)。
+      const ALERT_KEY = "tm.alert.glm:default"; // glm:default 5h = 23.5%(罐头数据)
+      document.getElementById("btn-alerttest").addEventListener("click", async function () {
+        const banner = document.getElementById("selftest-result");
+        const checks = [];
+        try {
+          const ball = () => document.querySelector(".pv-tm-ball");
+          const refreshViaMenu = async () => {
+            document.querySelector(".pv-tm-wrap")
+              .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+            const menuOf = () => document.querySelector(".pv-tm-menu");
+            await waitFor(() => menuOf() && !menuOf().hidden &&
+              menuOf().querySelectorAll(".pv-tm-menu-item").length > 0, 2000);
+            menuOf().querySelector(".pv-tm-menu-icon").closest(".pv-tm-menu-item").click();
+            await waitFor(() => menuOf().hidden, 2000);
+          };
+          // ① 阈值 20(23.5 ≥ 20):告警态全链
+          kv.set(ALERT_KEY, { enabled: true, threshold: 20 });
+          await refreshViaMenu();
+          await waitFor(() => ball().classList.contains("pv-tm-alerting"), 2000);
+          checks.push(["超阈值告警态", ball().classList.contains("pv-tm-alerting")]);
+          checks.push(["脉冲图层常驻", !!ball().querySelector(".pv-tm-pulse")]);
+          checks.push(["徽标显现", getComputedStyle(ball().querySelector(".pv-tm-badge")).display === "block"]);
+          checks.push(["tooltip 告警行", ball().title.indexOf("已超阈值 20%") >= 0]);
+          // ② 阈值 100(23.5 < 100):解除
+          kv.set(ALERT_KEY, { enabled: true, threshold: 100 });
+          await refreshViaMenu();
+          await waitFor(() => !ball().classList.contains("pv-tm-alerting"), 2000);
+          checks.push(["阈值抬高解除", !ball().classList.contains("pv-tm-alerting")]);
+          checks.push(["徽标隐藏", getComputedStyle(ball().querySelector(".pv-tm-badge")).display === "none"]);
+          // ③ 开关关:解除(徽标隐藏、tooltip 无告警行)
+          kv.set(ALERT_KEY, { enabled: false, threshold: 20 });
+          await refreshViaMenu();
+          await waitFor(() => !ball().classList.contains("pv-tm-alerting"), 2000);
+          checks.push(["开关关解除", !ball().classList.contains("pv-tm-alerting")]);
+          checks.push(["tooltip 无告警行", ball().title.indexOf("已超阈值") < 0]);
+          kv.delete(ALERT_KEY);
+          const failed = checks.filter(([, ok]) => !ok);
+          banner.textContent = "告警自检 " + (failed.length === 0 ? "全部通过" : "失败") + " — " +
+            checks.map(([name, ok]) => name + (ok ? " ✓" : " ✗")).join(" · ");
+          banner.dataset.fail = failed.length > 0 ? "1" : "";
+        } catch (e) {
+          banner.textContent = "告警自检异常:" + ((e && e.message) || e);
+          banner.dataset.fail = "1";
         }
       });
     </script>

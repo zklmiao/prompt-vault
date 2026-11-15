@@ -1,0 +1,337 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>悬浮球用量告警 — UI 定稿稿</title><style>body{margin:0;padding:12px;background:#101114}</style></head><body><div id="pv-alert-design" class="pv-dark" data-zcode-design>
+<style>
+#pv-alert-design{
+  /* ── Prompt Vault 应用令牌(与 src/App.css 逐字对应;mockup 专用作用域) ── */
+  --pv-bg:#f5f6f8; --pv-panel:#ffffff; --pv-panel-hover:#f6f7f9;
+  --pv-border:#e3e5ea; --pv-border-strong:#c9cdd6;
+  --pv-text:#1f2329; --pv-muted:#8a9099;
+  --pv-accent:#4f6ef2; --pv-accent-soft:#eef1ff;
+  --pv-danger:#d4494f; --pv-danger-soft:#fdf1f1;
+  --pv-shadow:0 12px 40px rgba(0,0,0,.18);
+  font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  color:var(--pv-text); background:var(--pv-bg);
+  border-radius:12px; padding:18px 18px 22px; max-width:920px; margin:0 auto;
+}
+#pv-alert-design.pv-dark{
+  --pv-bg:#17181c; --pv-panel:#1f2127; --pv-panel-hover:#262932;
+  --pv-border:#2e3138; --pv-border-strong:#3d414b;
+  --pv-text:#e8eaf0; --pv-muted:#9aa0ab;
+  --pv-accent:#6b83f3; --pv-accent-soft:#262c47;
+  --pv-danger:#e06b70; --pv-danger-soft:#3a2629;
+  --pv-shadow:0 12px 40px rgba(0,0,0,.55);
+}
+#pv-alert-design *{box-sizing:border-box;}
+#pv-alert-design .pv-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+#pv-alert-design .pv-toolbar h3{margin:0;font-size:14px;font-weight:600;}
+#pv-alert-design .pv-toolbar .pv-sub{font-size:12px;color:var(--pv-muted);}
+#pv-alert-design .pv-spacer{flex:1;}
+#pv-alert-design .pv-theme-btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+  color:var(--pv-text);background:var(--pv-panel);border:1px solid var(--pv-border);
+  border-radius:999px;padding:5px 12px;cursor:pointer;}
+#pv-alert-design .pv-theme-btn:hover{background:var(--pv-panel-hover);}
+#pv-alert-design .pv-sec{font-size:11px;font-weight:600;color:var(--pv-muted);margin:18px 0 8px;}
+#pv-alert-design .pv-spec{background:var(--pv-panel);border:1px solid var(--pv-border);
+  border-radius:10px;padding:14px;}
+/* ── 面板复刻:主-分栏仪表 ── */
+#pv-alert-design .pv-panel-grid{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap;}
+#pv-alert-design .pv-cards{flex:1 1 320px;min-width:280px;display:flex;flex-direction:column;gap:10px;}
+#pv-alert-design .pv-card{border:1px solid var(--pv-border);border-radius:8px;padding:12px;background:var(--pv-bg);}
+#pv-alert-design .pv-card-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+#pv-alert-design .pv-card-name{font-size:12px;font-weight:600;}
+#pv-alert-design .pv-chip{display:inline-flex;align-items:center;gap:5px;margin-left:auto;
+  background:var(--pv-danger-soft);color:var(--pv-danger);border-radius:999px;
+  padding:3px 9px;font-size:11px;font-weight:600;white-space:nowrap;}
+#pv-alert-design .pv-stat{display:flex;justify-content:space-between;align-items:center;
+  font-size:12px;margin-bottom:8px;gap:10px;}
+#pv-alert-design .pv-stat .pv-l{color:var(--pv-muted);flex-shrink:0;}
+#pv-alert-design .pv-stat .pv-v{font-variant-numeric:tabular-nums;font-weight:600;}
+#pv-alert-design .pv-stat .pv-v.pv-danger-text{color:var(--pv-danger);}
+#pv-alert-design .pv-bar{height:6px;border-radius:999px;background:var(--pv-border);
+  overflow:hidden;margin:-2px 0 10px;}
+#pv-alert-design .pv-bar i{display:block;height:100%;border-radius:999px;}
+#pv-alert-design .pv-meta{font-size:11px;color:var(--pv-muted);margin-top:2px;}
+/* ── 设置列 ── */
+#pv-alert-design .pv-settings{flex:1 1 300px;min-width:280px;border:1px solid var(--pv-border);
+  border-radius:8px;padding:12px;background:var(--pv-bg);}
+#pv-alert-design .pv-group-head{font-size:11px;font-weight:600;color:var(--pv-muted);margin-bottom:10px;}
+#pv-alert-design .pv-trow{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+#pv-alert-design .pv-trow:last-of-type{margin-bottom:0;}
+#pv-alert-design .pv-abbr-chip{flex-shrink:0;width:44px;text-align:center;font-size:11px;font-weight:600;
+  color:var(--pv-accent);background:var(--pv-accent-soft);border-radius:999px;padding:3px 0;}
+#pv-alert-design .pv-switch{position:relative;display:inline-block;width:34px;height:19px;flex-shrink:0;}
+#pv-alert-design .pv-switch input{opacity:0;width:0;height:0;position:absolute;margin:0;}
+#pv-alert-design .pv-switch span{position:absolute;inset:0;border-radius:999px;
+  background:var(--pv-border-strong);transition:background .15s ease;cursor:pointer;}
+#pv-alert-design .pv-switch span::before{content:"";position:absolute;width:15px;height:15px;left:2px;top:2px;
+  border-radius:999px;background:var(--pv-panel);transition:transform .15s ease;box-shadow:0 1px 2px rgba(0,0,0,.2);}
+#pv-alert-design .pv-switch input:checked + span{background:var(--pv-accent);}
+#pv-alert-design .pv-switch input:checked + span::before{transform:translateX(15px);}
+#pv-alert-design .pv-switch input:disabled + span{opacity:.45;cursor:default;}
+#pv-alert-design .pv-range{flex:1;min-width:120px;height:4px;border-radius:999px;
+  -webkit-appearance:none;appearance:none;outline-offset:2px;cursor:pointer;}
+#pv-alert-design .pv-range::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+  border-radius:999px;background:var(--pv-panel);border:2px solid var(--pv-border-strong);
+  box-shadow:0 1px 2px rgba(0,0,0,.2);}
+#pv-alert-design .pv-range::-moz-range-thumb{width:12px;height:12px;border-radius:999px;
+  background:var(--pv-panel);border:2px solid var(--pv-border-strong);}
+#pv-alert-design .pv-trow.pv-off .pv-range{opacity:.45;pointer-events:none;}
+#pv-alert-design .pv-trow.pv-off .pv-abbr-chip{opacity:.5;}
+#pv-alert-design .pv-tval{flex-shrink:0;width:38px;text-align:right;font-size:12px;font-weight:600;
+  font-variant-numeric:tabular-nums;}
+#pv-alert-design .pv-trow.pv-off .pv-tval{color:var(--pv-muted);font-weight:400;}
+#pv-alert-design .pv-hint{font-size:11px;color:var(--pv-muted);margin-top:10px;line-height:1.5;}
+#pv-alert-design .pv-sep{height:1px;background:var(--pv-border);margin:12px 0;}
+#pv-alert-design .pv-poll-row{display:flex;align-items:center;gap:10px;font-size:12px;}
+#pv-alert-design .pv-poll-row .pv-l{color:var(--pv-muted);}
+#pv-alert-design .pv-poll-row .pv-r{margin-left:auto;color:var(--pv-muted);font-variant-numeric:tabular-nums;}
+/* ── 悬浮球(84px 窗口,壁纸点阵示意) ── */
+#pv-alert-design .pv-wall{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start;
+  border-radius:10px;border:1px dashed var(--pv-border-strong);padding:22px 18px 16px;
+  background-image:radial-gradient(var(--pv-border-strong) 1px, transparent 1px);
+  background-size:18px 18px;background-position:center;}
+#pv-alert-design .pv-ball-cell{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;width:132px;}
+#pv-alert-design .pv-ball-box{position:relative;width:84px;height:84px;}
+#pv-alert-design .pv-ball{position:absolute;left:50%;top:4px;width:76px;height:76px;margin-left:-38px;
+  background:transparent;border:none;padding:0;cursor:pointer;}
+#pv-alert-design .pv-abbr{font-size:15px;font-weight:600;fill:var(--pv-text);
+  paint-order:stroke;stroke:var(--pv-panel);stroke-width:3px;stroke-linejoin:round;}
+#pv-alert-design .pv-intl{font-size:9px;fill:var(--pv-muted);
+  paint-order:stroke;stroke:var(--pv-panel);stroke-width:2.5px;stroke-linejoin:round;}
+#pv-alert-design .pv-pct{font-size:11px;fill:var(--pv-text);font-variant-numeric:tabular-nums;
+  paint-order:stroke;stroke:var(--pv-panel);stroke-width:2.5px;stroke-linejoin:round;}
+#pv-alert-design .pv-ring{transition:stroke-dashoffset .4s ease,stroke .4s ease;}
+#pv-alert-design .pv-pulse{opacity:0;}
+#pv-alert-design .pv-ball-cell.pv-alerting .pv-pulse{
+  animation:pvPulse 2.4s ease-in-out infinite;transform-origin:38px 38px;}
+@keyframes pvPulse{0%,100%{opacity:.16;transform:scale(1);}50%{opacity:.5;transform:scale(1.07);}}
+@media (prefers-reduced-motion: reduce){#pv-alert-design .pv-ball-cell.pv-alerting .pv-pulse{
+  animation:none;opacity:.32;}}
+#pv-alert-design .pv-badge{display:none;position:absolute;top:2px;right:9px;width:10px;height:10px;
+  border-radius:999px;background:var(--pv-danger);box-shadow:0 0 0 2px var(--pv-panel);}
+#pv-alert-design .pv-ball-cell.pv-alerting .pv-badge{display:block;}
+#pv-alert-design .pv-ball-label{font-size:11px;color:var(--pv-muted);text-align:center;line-height:1.5;}
+#pv-alert-design .pv-tip{position:absolute;left:92px;top:2px;width:184px;z-index:5;
+  background:var(--pv-panel);border:1px solid var(--pv-border);border-radius:10px;
+  box-shadow:var(--pv-shadow);padding:9px 11px;font-size:12px;}
+#pv-alert-design .pv-tip .pv-tip-row{display:flex;justify-content:space-between;gap:8px;
+  padding:2px 0;font-variant-numeric:tabular-nums;}
+#pv-alert-design .pv-tip .pv-tip-row .pv-l{color:var(--pv-muted);}
+#pv-alert-design .pv-tip .pv-tip-alert{display:flex;justify-content:space-between;gap:8px;
+  margin-top:5px;padding:4px 7px;border-radius:6px;background:var(--pv-danger-soft);
+  color:var(--pv-danger);font-size:11px;font-weight:600;}
+/* ── Windows 通知(Win11 深色样式示意;实际由系统按其主题渲染) ── */
+#pv-alert-design .pv-desktop{position:relative;border-radius:10px;min-height:150px;
+  background:linear-gradient(135deg,#1c2027 0%,#232a35 60%,#2b1f2a 100%);padding:14px;}
+#pv-alert-design .pv-toast{width:372px;max-width:100%;margin-left:auto;margin-top:6px;
+  background:rgba(32,32,32,.97);border:1px solid rgba(255,255,255,.09);border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);padding:12px 14px;color:#ffffff;
+  font-family:"Segoe UI Variable","Segoe UI","Microsoft YaHei",sans-serif;}
+#pv-alert-design .pv-toast-head{display:flex;align-items:center;gap:10px;}
+#pv-alert-design .pv-toast-icon{width:32px;height:32px;border-radius:7px;background:var(--pv-accent);
+  display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;}
+#pv-alert-design .pv-toast-title{font-size:13px;font-weight:600;}
+#pv-alert-design .pv-toast-src{font-size:11px;color:rgba(255,255,255,.62);}
+#pv-alert-design .pv-toast-x{margin-left:auto;color:rgba(255,255,255,.62);
+  background:transparent;border:none;cursor:pointer;display:flex;padding:3px;border-radius:5px;}
+#pv-alert-design .pv-toast-x:hover{background:rgba(255,255,255,.1);}
+#pv-alert-design .pv-toast-body{font-size:13px;line-height:1.5;margin:9px 0 0 42px;color:rgba(255,255,255,.92);}
+@media (max-width:660px){ #pv-alert-design .pv-tip{position:static;margin-top:10px;} }
+</style>
+
+<div class="pv-toolbar">
+  <h3>悬浮球用量告警 — UI 定稿稿</h3>
+  <span class="pv-sub">5 小时窗口 · 每个监控项独立阈值 5–100%</span>
+  <span class="pv-spacer"></span>
+  <button type="button" class="pv-theme-btn" id="pv-theme-btn">
+    <i data-lucide="moon" aria-hidden="true"></i><span id="pv-theme-label">亮色</span>
+  </button>
+</div>
+
+<div class="pv-sec">插件面板 · 卡片告警态与阈值设置</div>
+<div class="pv-spec">
+  <div class="pv-panel-grid">
+    <div class="pv-cards">
+      <div class="pv-card">
+        <div class="pv-card-head">
+          <span class="pv-card-name">GLM · 当前</span>
+          <span class="pv-chip" id="pv-chip-glm"><i data-lucide="bell-ring" aria-hidden="true"></i>已超阈值</span>
+        </div>
+        <div class="pv-stat"><span class="pv-l">5 小时窗口</span><span class="pv-v pv-danger-text" id="pv-card-pct">91%</span></div>
+        <div class="pv-bar"><i id="pv-card-bar" style="width:91%;background:var(--pv-danger);"></i></div>
+        <div class="pv-stat"><span class="pv-l">本周期限额</span><span class="pv-v">重置前可用 9%</span></div>
+        <div class="pv-stat" style="margin-top:-2px;"><span class="pv-l">本周限额</span><span class="pv-v">34%</span></div>
+        <div class="pv-bar"><i style="width:34%;background:var(--pv-accent);"></i></div>
+        <div class="pv-stat"><span class="pv-l">近 24 小时 Tokens</span><span class="pv-v">43,800</span></div>
+        <div class="pv-stat"><span class="pv-l">MCP 月度</span><span class="pv-v">230 / 800</span></div>
+        <div class="pv-meta">上次刷新 14:32 · 下次轮询 2 分钟后</div>
+      </div>
+    </div>
+    <div class="pv-settings">
+      <div class="pv-group-head">告警阈值 · 5 小时窗口</div>
+      <div class="pv-trow" id="pv-row-glm">
+        <span class="pv-abbr-chip">GLM</span>
+        <label class="pv-switch"><input type="checkbox" id="pv-sw-glm" checked aria-label="GLM 阈值告警开关"><span></span></label>
+        <input type="range" class="pv-range" id="pv-range-glm" min="5" max="100" step="1" value="80" aria-label="GLM 阈值百分比">
+        <span class="pv-tval" id="pv-val-glm">80%</span>
+      </div>
+      <div class="pv-trow" id="pv-row-ark">
+        <span class="pv-abbr-chip">ARK</span>
+        <label class="pv-switch"><input type="checkbox" id="pv-sw-ark" checked aria-label="ARK 阈值告警开关"><span></span></label>
+        <input type="range" class="pv-range" id="pv-range-ark" min="5" max="100" step="1" value="80" aria-label="ARK 阈值百分比">
+        <span class="pv-tval" id="pv-val-ark">80%</span>
+      </div>
+      <div class="pv-trow pv-off" id="pv-row-oc">
+        <span class="pv-abbr-chip">OC</span>
+        <label class="pv-switch"><input type="checkbox" id="pv-sw-oc" aria-label="OC 阈值告警开关"><span></span></label>
+        <input type="range" class="pv-range" id="pv-range-oc" min="5" max="100" step="1" value="60" aria-label="OC 阈值百分比">
+        <span class="pv-tval" id="pv-val-oc">60%</span>
+      </div>
+      <div class="pv-hint">用量达到阈值立即发一条 Windows 通知(每个窗口周期最多一条);窗口重置或用量降回阈值之下后重新武装。</div>
+      <div class="pv-sep"></div>
+      <div class="pv-poll-row">
+        <span class="pv-l">自动轮询</span>
+        <label class="pv-switch"><input type="checkbox" checked aria-label="自动轮询开关"><span></span></label>
+        <span class="pv-r">每 120 秒</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pv-sec">悬浮球 · 84px(点阵示意桌面壁纸;第三颗随上方设置实时联动)</div>
+<div class="pv-wall">
+  <div class="pv-ball-cell">
+    <div class="pv-ball-box" id="pv-ball-ark"></div>
+    <div class="pv-ball-label">正常<br>ARK 25% · 告警未超</div>
+  </div>
+  <div class="pv-ball-cell">
+    <div class="pv-ball-box" id="pv-ball-oc"></div>
+    <div class="pv-ball-label">高位 · 告警未启用<br>OC 83% 不提醒</div>
+  </div>
+  <div class="pv-ball-cell pv-alerting" id="pv-ball-live-cell">
+    <div class="pv-ball-box" id="pv-ball-glm">
+      <div class="pv-badge" aria-hidden="true"></div>
+    </div>
+    <div class="pv-ball-label">告警中 · GLM<br>91% ≥ 阈值 <span id="pv-ball-thr">80</span>%</div>
+    <div class="pv-tip" id="pv-tip-glm" role="status">
+      <div class="pv-tip-row"><span class="pv-l">5 小时窗口</span><span id="pv-tip-pct">91%</span></div>
+      <div class="pv-tip-row"><span class="pv-l">本周限额</span><span>34%</span></div>
+      <div class="pv-tip-row"><span class="pv-l">窗口重置</span><span>2 小时 14 分后</span></div>
+      <div class="pv-tip-alert" id="pv-tip-alert"><span>已超阈值 80%</span><span>已于 14:32 通知</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="pv-sec">Windows 通知 · 系统样式示意(实际由 Windows 按系统主题渲染,内容为应用可控部分)</div>
+<div class="pv-desktop">
+  <div class="pv-toast">
+    <div class="pv-toast-head">
+      <div class="pv-toast-icon"><i data-lucide="vault" aria-hidden="true"></i></div>
+      <div>
+        <div class="pv-toast-title">用量告警</div>
+        <div class="pv-toast-src">Prompt Vault</div>
+      </div>
+      <button type="button" class="pv-toast-x" aria-label="关闭通知"><i data-lucide="x" aria-hidden="true"></i></button>
+    </div>
+    <div class="pv-toast-body">GLM 5 小时用量已达 91%,超过阈值 80%。</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var root = document.getElementById('pv-alert-design');
+  var RING_C = 2 * Math.PI * 32;
+
+  var state = {
+    glm: { abbr: 'GLM', intl: 'CN', pct: 91, thr: 80, on: true },
+    ark: { abbr: 'ARK', intl: '',  pct: 25, thr: 80, on: true },
+    oc:  { abbr: 'OC',  intl: '',  pct: 83, thr: 60, on: false }
+  };
+
+  function tokens() {
+    var cs = getComputedStyle(root);
+    return {
+      accent: cs.getPropertyValue('--pv-accent').trim(),
+      danger: cs.getPropertyValue('--pv-danger').trim(),
+      track: cs.getPropertyValue('--pv-border-strong').trim()
+    };
+  }
+
+  function strokeFor(pct) { return pct >= 80 ? tokens().danger : tokens().accent; }
+
+  function ballSvg(abbr, intl, pct) {
+    var offset = RING_C * (1 - pct / 100);
+    return '<svg viewBox="0 0 76 76" width="76" height="76" aria-hidden="true">' +
+      '<circle class="pv-pulse" cx="38" cy="38" r="35" fill="none" stroke="' + strokeFor(pct) +
+        '" stroke-width="3" transform-origin="38 38"/>' +
+      '<circle cx="38" cy="38" r="32" fill="none" stroke="var(--pv-border-strong)" stroke-width="6"/>' +
+      '<circle class="pv-ring" cx="38" cy="38" r="32" fill="none" stroke="' + strokeFor(pct) +
+        '" stroke-width="6" stroke-linecap="round" stroke-dasharray="' + RING_C +
+        '" stroke-dashoffset="' + offset + '" transform="rotate(-90 38 38)"/>' +
+      '<text class="pv-abbr" x="38" y="34" text-anchor="middle">' + abbr +
+        (intl ? ' <tspan class="pv-intl">' + intl + '</tspan>' : '') + '</text>' +
+      '<text class="pv-pct" x="38" y="50" text-anchor="middle">' + pct + '%</text>' +
+      '</svg>';
+  }
+
+  function paintRange(input, on) {
+    var t = tokens();
+    var v = on ? ((input.value - 5) / 95) * 100 : 0;
+    input.style.background = 'linear-gradient(to right,' + t.accent + ' 0%,' + t.accent +
+      ' ' + v + '%,' + t.track + ' ' + v + '%,' + t.track + ' 100%)';
+  }
+
+  function paintBall(id, key) {
+    var s = state[key];
+    document.getElementById(id).innerHTML = ballSvg(s.abbr, s.intl, s.pct);
+  }
+
+  function applyGlmAlert() {
+    var s = state.glm;
+    var alerting = s.on && s.pct >= s.thr;
+    document.getElementById('pv-chip-glm').style.display = alerting ? 'inline-flex' : 'none';
+    document.getElementById('pv-ball-live-cell').classList.toggle('pv-alerting', alerting);
+    document.getElementById('pv-tip-alert').style.display = alerting ? 'flex' : 'none';
+    document.getElementById('pv-ball-thr').textContent = s.thr;
+    document.getElementById('pv-tip-pct').textContent = s.pct + '%';
+  }
+
+  function repaintAll() {
+    paintBall('pv-ball-ark', 'ark');
+    paintBall('pv-ball-oc', 'oc');
+    paintBall('pv-ball-glm', 'glm');
+    ['glm', 'ark', 'oc'].forEach(function (k) {
+      paintRange(document.getElementById('pv-range-' + k), state[k].on);
+    });
+    applyGlmAlert();
+  }
+
+  ['glm', 'ark', 'oc'].forEach(function (k) {
+    var range = document.getElementById('pv-range-' + k);
+    var sw = document.getElementById('pv-sw-' + k);
+    range.addEventListener('input', function () {
+      state[k].thr = Number(range.value);
+      document.getElementById('pv-val-' + k).textContent = range.value + '%';
+      paintRange(range, state[k].on);
+      if (k === 'glm') applyGlmAlert();
+    });
+    sw.addEventListener('change', function () {
+      state[k].on = sw.checked;
+      document.getElementById('pv-row-' + k).classList.toggle('pv-off', !sw.checked);
+      paintRange(range, state[k].on);
+      if (k === 'glm') applyGlmAlert();
+    });
+  });
+
+  var themeBtn = document.getElementById('pv-theme-btn');
+  themeBtn.addEventListener('click', function () {
+    var dark = root.classList.toggle('pv-dark');
+    document.getElementById('pv-theme-label').textContent = dark ? '亮色' : '暗色';
+    repaintAll();
+  });
+
+  repaintAll();
+  if (window.lucide) lucide.createIcons({ attrs: { width: 16, height: 16 } });
+})();
+</script>
+</div>
+</body></html>
