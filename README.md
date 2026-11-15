@@ -102,17 +102,16 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 ### 方式一：下载即用（推荐）
 
-**尝鲜版 `v0.1.9.2-alpha` 直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.2-alpha/PromptVault-0.1.9.2-alpha-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.2-alpha/PromptVault-0.1.9.2-alpha-portable.exe) · [回归测试报告](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.2-alpha/PromptVault-0.1.9.2-alpha-regression-report.md)
+**尝鲜版 `v0.1.9.3-alpha` 直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3-alpha/PromptVault-0.1.9.3-alpha-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3-alpha/PromptVault-0.1.9.3-alpha-portable.exe)
 
 到 [**Releases**](../../releases) 下载稳定版（预发布版本在 Pre-release 区域）：
 
-> **推荐体验 `v0.1.9.2-alpha`**：包含全部最新特性。发布前已通过**全量程序化测试**（TypeScript 类型检查、构建、回归脚本与测试报告），仅缺少**人工回归测验**；欢迎试用并反馈问题。
+> **推荐体验 `v0.1.9.3-alpha`**：新增界面常驻快捷键提示（侧栏底部）与快速拾取 `Ctrl+N` 唤出主窗口新建。发布前已通过程序化测试（TypeScript 类型检查零错误、Rust 测试 7/7 通过、构建与冒烟启动）；欢迎试用并反馈问题。
 
 | 文件 | 说明 |
 |---|---|
-| `PromptVault-0.1.9.2-alpha-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
-| `PromptVault-0.1.9.2-alpha-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
-| `PromptVault-0.1.9.2-alpha-regression-report.md` | 该版本的全量程序化测试报告 |
+| `PromptVault-0.1.9.3-alpha-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
+| `PromptVault-0.1.9.3-alpha-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
 
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
