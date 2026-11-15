@@ -32,6 +32,7 @@ import {
   newerIso,
   nowIso,
   serializeDataFile,
+  sha256Hex,
 } from "./util";
 import { applyTheme, currentTheme } from "./theme";
 import { useI18n } from "./i18n";
@@ -162,6 +163,22 @@ function LoadErrorScreen({
   );
 }
 
+/* ============ 私人彩蛋「密语暗屉」 ============ */
+// 私人彩蛋文案:硬编码中文,不进 i18n;正文(隐藏 prompt)显示与复制同源,
+// 经 prop 传给 Sidebar;永不落盘——复制不走 handleCopy,不增 copyCount、不写统计
+const EGG_BODY = "写一封信，寄给还没成为自己的那天。";
+// 复制成功专属 toast 文案(不走通用「已复制」)
+const EGG_COPIED_TOAST = "无论朝哪个方向飞，都是正确的。";
+// 私人彩蛋密语摘要:比对 sha256Hex(search.trim())(区分大小写,除 trim 外不做
+// 任何归一化);密语明文不进仓库、不进对话、不进任何落盘文件,仅由用户本人持有
+const EGG_DIGEST =
+  "78ba78d8117d18e29bdaa8b2dcffaf9dba98c846a91580d332a7bb788bb1aeef";
+// 预览夹具:?egg=1 仅绕过摘要校验(命中恒真),仅供评审/回归,生命周期共用同一
+// 段逻辑——夹具命中恒真,复制收回后改动一次搜索即可再现;真机则需重新输入密语;
+// 打包环境无人传此参数,天然惰性
+const EGG_FIXTURE =
+  new URLSearchParams(window.location.search).get("egg") === "1";
+
 export default function App() {
   const { t } = useI18n();
   const [ready, setReady] = useState(false);
@@ -170,6 +187,8 @@ export default function App() {
   const [restoreState, setRestoreState] = useState<RestoreState>("idle");
   const [items, setItems] = useState<PromptItem[]>([]);
   const [search, setSearch] = useState("");
+  /** 私人彩蛋「密语暗屉」:摘要命中时浮现;搜索一改或复制后收回(见下方 effect) */
+  const [eggOpen, setEggOpen] = useState(false);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -241,6 +260,26 @@ export default function App() {
   useEffect(() => {
     paneRef.current = pane;
   }, [pane]);
+
+  // 私人彩蛋「密语暗屉」:在原有「摘要命中即显、搜索一改即收回」逻辑上,
+  // 评审补充「复制后收回」——复制成功即隐藏,下次搜索命中时自然再现(真机需
+  // 重新输入密语)。防抖 ~150ms 后比对 sha256Hex(search.trim()) 与 EGG_DIGEST
+  //(区分大小写,除 trim 外不做任何归一化),命中浮现、失败静默。
+  // sha256Hex fail-closed 返回 "" 恒不命中(无 crypto.subtle 的环境彩蛋自动失效);
+  // epoch 守卫丢弃过期异步结果(连续输入仅最后一次生效)。
+  // 夹具 ?egg=1 仅绕过摘要校验(命中恒真),逻辑共用同一段
+  const eggEpoch = useRef(0);
+  useEffect(() => {
+    setEggOpen(false); // 搜索一改即收回(复制收回见 handleEggCopy)
+    const epoch = ++eggEpoch.current;
+    const timer = window.setTimeout(() => {
+      void sha256Hex(search.trim()).then((digest) => {
+        if (eggEpoch.current !== epoch) return;
+        setEggOpen(EGG_FIXTURE || (digest !== "" && digest === EGG_DIGEST));
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const showToast = useCallback((text: string, kind: "ok" | "err" = "ok") => {
     setToast({ text, kind });
@@ -1004,6 +1043,19 @@ export default function App() {
     }
   }, []);
 
+  // 私人彩蛋复制:不走 handleCopy/copyWithToast 的统计链路——不增 copyCount、
+  // 不触发统计写盘;失败复用既有 err toast 文案(彩蛋文案不进 i18n,错误文案是
+  // 存量 key)。复制成功即收回(评审补充),下次搜索命中时自然再现
+  const handleEggCopy = useCallback(async () => {
+    try {
+      await copyToClipboard(EGG_BODY);
+      setEggOpen(false);
+      showToast(EGG_COPIED_TOAST);
+    } catch (e) {
+      showToast(t("toast.copyFailed", { msg: String(e) }), "err");
+    }
+  }, [showToast, t]);
+
   const handleCopy = useCallback(
     async (item: PromptItem) => {
       if (extractPlaceholders(item.body).length > 0) {
@@ -1664,6 +1716,9 @@ export default function App() {
               onCheckbox={toggleSelected}
               onTagClick={handleTagClick}
               onQuickCopy={(it) => void handleCopy(it)}
+              eggOpen={eggOpen}
+              eggBody={EGG_BODY}
+              onEggCopy={() => void handleEggCopy()}
             />
         {selectedIds.size > 0 ? (
           <BatchPanel

@@ -15,6 +15,7 @@ import {
   fillPlaceholders,
   formatDate,
   isComposingEvent,
+  isTdov,
   matchPrompt,
 } from "./util";
 import type { PromptMatch } from "./util";
@@ -24,12 +25,18 @@ import PlaceholderModal from "./components/PlaceholderModal";
 import TagChips from "./components/TagChips";
 import BodyText from "./components/BodyText";
 import Highlight from "./components/Highlight";
-import { IconCheck, IconSearch } from "./components/icons";
+import { IconCheck, IconFlagCheck, IconSearch } from "./components/icons";
 
 const MAX_RESULTS = 7;
 const RECENT_LIMIT = 5;
 const MOST_LIMIT = 5;
 const CONFIRM_MS = 420;
+
+// 私人彩蛋「3 月 31 日五色对勾」夹具:?tdov=1 强制按 TDOV 日显示五色对勾
+//(仅供评审/回归,可与 ?quickpick=1 并用;打包环境无人传此参数,天然惰性)。
+// 正常触发走 util.isTdov() 本地日期门(渲染时求值),见确认态三元
+const EGG_TDOV_FIXTURE =
+  new URLSearchParams(window.location.search).get("tdov") === "1";
 
 interface Row {
   item: PromptItem;
@@ -428,7 +435,13 @@ export default function QuickPick() {
         </div>
         {copied && (
           <div className="qp-confirm">
-            <IconCheck size={26} />
+            {/* 私人彩蛋「3 月 31 日五色对勾」:isTdov() 本地日期门,?tdov=1 夹具强制;
+                size 40 + 收紧 viewBox 为评审调整(见 icons.tsx 注释);非彩蛋日原样 26 */}
+            {isTdov() || EGG_TDOV_FIXTURE ? (
+              <IconFlagCheck size={40} />
+            ) : (
+              <IconCheck size={26} />
+            )}
             <div className="qp-confirm-text">{t("qp.copied")}</div>
             {copied.variables > 0 && (
               <div className="qp-confirm-sub">

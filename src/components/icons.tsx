@@ -266,3 +266,66 @@ export function IconMcp(p: IconProps) {
     </Svg>
   );
 }
+
+/** 私人彩蛋「密语暗屉」(蝴蝶):24 viewBox 线性双翼 + 身体中线,与库内线性图标
+    同族。本文件不含五色——彩蛋颜色例外集中在使用处与 App.css 彩蛋节 */
+export function IconButterfly(p: IconProps) {
+  return (
+    <Svg {...p}>
+      {/* 左翼(上叶 + 下叶,起收笔都落在身体中线上) */}
+      <path d="M12 7C11.1 4.8 9 3 6.8 3 4.6 3 3 4.5 3 6.6c0 2.7 2.4 4.8 5.6 5.4C5.4 12.6 3 14.7 3 17.4 3 19.5 4.6 21 6.8 21c2.2 0 4.3-1.8 5.2-4" />
+      {/* 右翼:同形镜像(x → 24−x,相对指令 dx 取反) */}
+      <path d="M12 7C12.9 4.8 15 3 17.2 3 19.4 3 21 4.5 21 6.6c0 2.7-2.4 4.8-5.6 5.4C18.6 12.6 21 14.7 21 17.4 21 19.5 19.4 21 17.2 21c-2.2 0-4.3-1.8-5.2-4" />
+      {/* 身体中线 */}
+      <path d="M12 5.5V19" />
+    </Svg>
+  );
+}
+
+/** 私人彩蛋「3 月 31 日五色对勾」(仅 QuickPick 复制确认态):路径沿用 IconCheck
+    的 M20 6 9 17l-5-5,双层描边——底层 --border-strong 细晕(加宽 +0.6px,保证
+    五色中的白色中段在亮色 panel 底上可见),上层五色分段描边。尺寸接口同其他图标。
+    评审调整(阶段 1)一:原 size={26} 时字形仅占 viewBox 一角(实际勾形 ~18×12px)
+    显得过于克制,现收紧 viewBox 至字形包围盒(x 1.5..22.5 / y 3.5..19.5,含细晕
+    与圆角端点余量)并由调用处传 size={40},勾形实际渲染 ~31×21px,描边比例不变。
+    评审调整(阶段 1)二:先改分段硬切,终版回归克制渐变——每色实色平台 + 分界
+    仅 6% 窄幅过渡(见 defs 注释) */
+export function IconFlagCheck(p: IconProps) {
+  return (
+    <Svg viewBox="1.5 3.5 21 16" {...p}>
+      <defs>
+        {/* 私人彩蛋五色(#5BCEFA/#F5A9B8/#FFFFFF/#F5A9B8/#5BCEFA),
+            全项目唯一硬编码颜色例外,有意不 token 化。
+            评审调整(阶段 1):渐变克制——成对 stop 保留每色实色平台(14%/20%),
+            分界仅 6% 窄幅过渡(原规格 25% 全程混色过于模糊扩散) */}
+        <linearGradient id="pv-egg-flag-check" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#5BCEFA" />
+          <stop offset="0.14" stopColor="#5BCEFA" />
+          <stop offset="0.2" stopColor="#F5A9B8" />
+          <stop offset="0.34" stopColor="#F5A9B8" />
+          <stop offset="0.4" stopColor="#FFFFFF" />
+          <stop offset="0.6" stopColor="#FFFFFF" />
+          <stop offset="0.66" stopColor="#F5A9B8" />
+          <stop offset="0.8" stopColor="#F5A9B8" />
+          <stop offset="0.86" stopColor="#5BCEFA" />
+          <stop offset="1" stopColor="#5BCEFA" />
+        </linearGradient>
+      </defs>
+      {/* 底层细晕:stroke 走 CSS 变量(presentation attribute 不支持 var()) */}
+      <path
+        d="M20 6 9 17l-5-5"
+        strokeWidth={2.4}
+        style={{ stroke: "var(--border-strong)" }}
+        pathLength={1}
+        className="pv-egg-flag-draw"
+      />
+      {/* 上层五色描边(克制渐变:实色平台 + 6% 窄幅过渡) */}
+      <path
+        d="M20 6 9 17l-5-5"
+        stroke="url(#pv-egg-flag-check)"
+        pathLength={1}
+        className="pv-egg-flag-draw"
+      />
+    </Svg>
+  );
+}

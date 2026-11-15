@@ -2,7 +2,7 @@ import type { PromptItem, SortMode } from "../types";
 import { formatDate } from "../util";
 import { useI18n } from "../i18n";
 import TagChips from "./TagChips";
-import { IconCopy } from "./icons";
+import { IconButterfly, IconCopy } from "./icons";
 
 interface Props {
   items: PromptItem[];
@@ -17,6 +17,11 @@ interface Props {
   onCheckbox: (id: string) => void;
   onTagClick: (tag: string) => void;
   onQuickCopy: (item: PromptItem) => void;
+  /** 私人彩蛋「密语暗屉」:命中密语时在 list-head 与列表之间浮现(阶段 1 走夹具) */
+  eggOpen: boolean;
+  /** 彩蛋正文由 App 传入:显示与复制同源,避免文案双处维护 */
+  eggBody: string;
+  onEggCopy: () => void;
 }
 
 export default function Sidebar({
@@ -32,6 +37,9 @@ export default function Sidebar({
   onCheckbox,
   onTagClick,
   onQuickCopy,
+  eggOpen,
+  eggBody,
+  onEggCopy,
 }: Props) {
   const { t } = useI18n();
 
@@ -61,6 +69,26 @@ export default function Sidebar({
           </select>
         )}
       </div>
+      {eggOpen && (
+        /* 私人彩蛋「密语暗屉」:listbox 语义之外的隐藏卡片;文案硬编码中文,
+           不进 i18n(标题「蜕」为纯展示,正文来自 App 以便复制同源) */
+        <div className="egg-card">
+          <IconButterfly size={16} className="egg-icon" />
+          <div className="egg-main">
+            <div className="egg-title">蜕</div>
+            <div className="egg-body">{eggBody}</div>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            title="复制"
+            aria-label="复制暗屉正文"
+            onClick={onEggCopy}
+          >
+            <IconCopy size={16} />
+          </button>
+        </div>
+      )}
       <div
         className={"list" + (selecting ? " selecting" : "")}
         role="listbox"

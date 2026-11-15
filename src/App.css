@@ -2377,3 +2377,89 @@ mark.hl {
   gap: 3px;
   line-height: 1.5;
 }
+
+/* ============ 私人彩蛋 ============ */
+/* 五色 #5BCEFA/#F5A9B8/#FFFFFF/#F5A9B8/#5BCEFA 是全项目唯一允许的硬编码颜色例外,
+   有意不 token 化,仅集中在本节;文案不进 i18n;永不落盘(不进 prompts.json/
+   统计/localStorage);动效走下方 keyframes,由全局 prefers-reduced-motion 关怀块
+   统一归零(瞬时完成即静态终态) */
+
+/* 彩蛋 A「密语暗屉」:侧栏 list-head 与列表之间浮现的隐藏卡片,与 .ph-row 同族 */
+.egg-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin: 10px 10px 8px;
+  padding: 10px 12px;
+  background-color: var(--panel);
+  /* 底边 2px 五色线:用 background 双层实现——等效于 border-image 方案,但
+     border-image 会波及四边描边(slice 铺满所有非零边框),故只把五色画在底边。
+     评审调整(阶段 1):渐变克制——每色保留实色平台(14%/20%),分界仅 6% 窄幅
+     过渡(原规格 25% 全程混色过于模糊扩散),颜色分明且有柔和衔接 */
+  background-image: linear-gradient(
+    to right,
+    #5bcefa 0 14%,
+    #f5a9b8 20% 34%,
+    #ffffff 40% 60%,
+    #f5a9b8 66% 80%,
+    #5bcefa 86% 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 2px;
+  background-position: bottom;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  animation: pv-egg-in 0.26s ease;
+}
+
+.egg-card:hover {
+  background-color: var(--panel-hover);
+}
+
+.egg-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.egg-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.egg-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.egg-body {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 入场:260ms 淡入 + 上浮 4px(纯 from 帧,动到自然位;reduced-motion 归零) */
+@keyframes pv-egg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 彩蛋 B「五色对勾」描画入场:0.35s stroke-dashoffset 描画(pathLength=1 归一化,
+   from 帧 offset 1 → 自然位 0;reduced-motion 由全局关怀块归零即静态终态) */
+.pv-egg-flag-draw {
+  stroke-dasharray: 1;
+  animation: pv-egg-flag-draw 0.35s ease-out both;
+}
+
+@keyframes pv-egg-flag-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
