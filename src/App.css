@@ -2,8 +2,10 @@
 :root {
   --bg: #f5f6f8;
   --panel: #ffffff;
-  --panel-hover: #f6f7f9;
-  --border: #e3e5ea;
+  /* 灰阶 2026-11-15 重排:原四档灰(#f6f7f9/#f8f9fb/#fafbfc)挤在 3% 亮度带内互相抵消,
+     hover 差仅 3.5% 不可感知;现拉开到每档 ~6%(GitHub 同类惯例) */
+  --panel-hover: #eef0f4;
+  --border: #d4d8df;
   --border-strong: #c9cdd6;
   --text: #1f2329;
   /* muted/accent 2026-11-15 对比度修订:#666d78 白卡 5.22:1、#3d5ddd 白卡 5.51:1
@@ -17,10 +19,13 @@
   --danger-soft: #fdf1f1;
   --on-danger: #ffffff;
   --star: #d9a013;
-  --body-bg: #f8f9fb;
-  --input-bg: #fafbfc;
-  --overlay: rgba(20, 22, 26, 0.4);
-  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.18);
+  --body-bg: #f2f4f7;
+  --input-bg: #f4f5f8;
+  /* 亮色遮罩配 backdrop-blur 后降黑防"发脏"(40%→30%,靠模糊而非压黑建立纵深) */
+  --overlay: rgba(20, 22, 26, 0.3);
+  /* 阴影分档:sm 给下拉/建议层,lg 给弹窗/顶层浮窗;亮色阴影降黑增弥散(0.18 在白底边缘发灰) */
+  --shadow-sm: 0 2px 8px rgba(15, 18, 25, 0.08);
+  --shadow-lg: 0 12px 40px rgba(15, 18, 25, 0.12);
   --toast-bg: #2c3038;
   --scroll: #d4d7de;
   --scroll-hover: #b9bec8;
@@ -40,24 +45,31 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #17181c;
-  --panel: #1f2127;
-  --panel-hover: #262932;
-  --border: #2e3138;
-  --border-strong: #3d414b;
-  --text: #e8eaf0;
-  --muted: #9aa0ab;
-  --accent: #6b83f3;
-  --accent-hover: #5871ea;
-  --accent-soft: #262c47;
+  /* 2026-11-15 台阶重排:原四层亮度差过小(bg 0.0092/body-bg 0.0116/panel 0.0153),
+     正文块糊在背景里;现按 Fluent/M3 色调分级逐级 ~1.5 倍(0.0070→0.0104→0.0168→0.0251→0.0380),
+     内凹面真凹、卡片真浮 */
+  --bg: #131418;
+  --panel: #20232b;
+  --panel-hover: #282c35;
+  --border: #323742;
+  --border-strong: #4a505c;
+  --text: #eceef4;
+  --muted: #a2a8b3;
+  --accent: #7d92f6;
+  /* 暗色 hover 方向反转:表面惯例是变亮(亮色才是变暗),原 #5871ea 反向 */
+  --accent-hover: #8fa2f7;
+  /* soft 底加深到 accent 12px 文字达 AA(4.69),不动 --accent 本体以免波及焦点环/链接 */
+  --accent-soft: #272d4a;
   --on-accent: #ffffff;
   --danger: #e06b70;
-  --danger-soft: #3a2629;
+  /* danger-soft 加深到 danger 12-13px 文字达 AA(4.63,含 err toast),不动 --danger 本体 */
+  --danger-soft: #36221f;
   --on-danger: #ffffff;
   --star: #e2b23e;
-  --body-bg: #1a1c21;
-  --input-bg: #1a1c21;
+  --body-bg: #181a20;
+  --input-bg: #181a20;
   --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
   --toast-bg: #33363e;
   --scroll: #3d414b;
@@ -406,19 +418,12 @@ textarea.mono {
   border-color: var(--border-strong);
 }
 
-/* 键盘焦点可见性:按钮族统一 accent 焦点环(:focus-visible 仅键盘触发,不干扰鼠标)。
-   文本输入不在此列——已有 border-color 变化信号;列表行 .row 自带 offset -2px 的环 */
-.btn:focus-visible,
-.icon-btn:focus-visible,
-.ph-seg:focus-visible,
-.chip-btn:focus-visible,
-.titlebar-btn:focus-visible,
-.link-btn:focus-visible,
-.pane-tab:focus-visible,
-.option:focus-visible,
-.ph-row-del:focus-visible,
-.sort-select:focus-visible,
-.switch input:focus-visible + span {
+/* 键盘焦点可见性::where 零特异性兜底全部按钮/下拉语义元素——宿主新组件与
+   插件注入的 <button> 自动获得焦点环,无需逐个枚举;文本输入不在此列(已有
+   border-color 变化信号),列表行 .row 保留自身 offset -2px 的更具体规则。
+   :focus-visible 仅键盘触发,不干扰鼠标;零特异性意味着组件可用更具体规则覆盖 */
+:where(button, select):focus-visible,
+:where(.switch input):focus-visible + span {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -927,7 +932,7 @@ textarea.mono {
   border: 1px solid var(--border);
   border-radius: 8px;
   margin-top: 4px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-sm);
   max-height: 220px;
   overflow-y: auto;
 }
@@ -1214,11 +1219,13 @@ textarea.mono {
 }
 
 /* 错误 toast:soft 底 + danger 字 + 描边(与 .ph-row-error 同族)。
-   原实心 danger 底 + 白字在暗色仅 3.23:1(13px 文字需 4.5:1) */
+   原实心 danger 底 + 白字在暗色仅 3.23:1(13px 文字需 4.5:1);
+   左侧 3px danger 实色条补偿 soft 化损失的警示权重——错误必须比常规 toast 更叫人 */
 .toast.err {
   background: var(--danger-soft);
   color: var(--danger);
   border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-left: 3px solid var(--danger);
 }
 
 @keyframes pv-toast-in {

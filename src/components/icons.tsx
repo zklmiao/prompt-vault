@@ -233,12 +233,24 @@ export function IconRefresh(p: IconProps) {
   );
 }
 
-/** 插件窗口 */
-export function IconWindow(p: IconProps) {
+/** 弹出/外部打开(窗口+右上外指箭头):在独立窗口打开插件。与标题栏
+    窗口控制图标(Maximize/Restore 纯矩形)刻意拉开,避免「窗口」语义撞车 */
+export function IconPopout(p: IconProps) {
   return (
     <Svg {...p}>
-      <rect x="4" y="6" width="16" height="12" rx="1.5" />
-      <path d="M4 10h16" />
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </Svg>
+  );
+}
+
+/** 右栏面板(窗口+右列分隔线):打开插件详情面板(宿主内的嵌入式页签) */
+export function IconPanelRight(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M15 3v18" />
     </Svg>
   );
 }

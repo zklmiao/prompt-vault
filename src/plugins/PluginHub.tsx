@@ -10,10 +10,11 @@ import {
   IconCopy,
   IconMarket,
   IconMcp,
+  IconPanelRight,
   IconPlugin,
+  IconPopout,
   IconRefresh,
   IconTrash,
-  IconWindow,
 } from "../components/icons";
 import {
   fetchSource,
@@ -513,7 +514,7 @@ export default function PluginHub({
                     title={t("ph.openWindow")}
                     onClick={() => openPluginWindow(id)}
                   >
-                    <IconWindow size={16} />
+                    <IconPopout size={16} />
                   </button>
                 ) : null}
                 {panels.some((p) => p.pluginId === id) ? (
@@ -522,7 +523,7 @@ export default function PluginHub({
                     title={t("ph.openPanel")}
                     onClick={() => setSection(`panel:${id}`)}
                   >
-                    <IconPlugin size={16} />
+                    <IconPanelRight size={16} />
                   </button>
                 ) : null}
                 <label className="switch" title={entry.enabled ? t("ph.toggleDisable") : t("ph.toggleEnable")}>
