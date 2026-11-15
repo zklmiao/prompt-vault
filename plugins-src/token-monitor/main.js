@@ -49,8 +49,18 @@
  *   cache:<provider>:<label> —— 每账号最近一次成功数据 + fetchedAt,失败不覆盖;
  *     label "default" 读取回落旧 cache:<provider>(旧单账号缓存兼容);
  *   tm.alert.<provider>:<label> —— 每账号告警阈值 {enabled,threshold}
- *     (键按账号 scope;单写者=面板实例,球实例只读;删除账号后键残留不清理)。
+ *     (键按账号 scope;单写者=面板实例,球实例只读;删除账号后键残留不清理);
+ *   tm.alertState.<provider>:<label> —— 通知去重状态 {firedAt,resetAt}(球实例写,
+ *     键按账号 scope;resetAt = 已通知窗口的重置时间,同窗口不重发)。
  */
+
+  // ============ 实例门:球实例 ============
+
+  // 球实例判定:宿主 PluginWindow 分流 URL 即 index.html?plugin=<id>(批次 1 落地),
+  // 面板实例(主窗注入)无该参数 → false。打在真实 location.search 上,不依赖
+  // __TAURI_INTERNALS__(纯浏览器夹具同路径可用);与 IS_BALL_WINDOW(窗口 label
+  // 判定,清单单写者语义)互补。通知职责由球实例独占,maybeNotify 零开销跳过面板实例
+  var IS_BALL_INSTANCE = /[?&]plugin=token-monitor(\b|[&=])/.test(location.search);
 
   // ============ 常量:五家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
 
@@ -421,6 +431,7 @@
   var KV_ACCOUNTS = 'tm.accounts';    // 账号清单(单写者=面板实例)
   var KV_CACHE_PREFIX = 'cache:';
   var KV_ALERT_PREFIX = 'tm.alert.';  // 告警阈值配置,键 = 前缀 + 账号 scope(单写者=面板实例)
+  var KV_ALERT_STATE_PREFIX = 'tm.alertState.'; // 通知去重状态,键 = 前缀 + 账号 scope(球实例写)
   var BALL_SIZE = 84;             // 球窗边长(与设计 §5.1 一致)
   var MENU_WIDTH = 172;           // 右键菜单宽度
   var POLL_MIN_SEC = 120;         // 轮询间隔下限(参照社区 statusline 120s 缓存实践)
@@ -1138,7 +1149,44 @@
     ball.classList.toggle('pv-tm-alerting', isBallAlerting());
   }
 
-  /** 拉当前账号数据并渲染;失败:环保留缓存值 + 中心「!」+ tooltip 错误 */
+  /**
+   * 通知状态机(edge-trigger,每窗口周期最多一条;球实例独占,面板实例零开销跳过)。
+   * 去重按窗口周期:tm.alertState.<scope> 记录已通知窗口的 resetAt,与当次相同 →
+   * 不重发(同窗口回落再回升也不重发,resetAt 是窗口身份,预期行为);resetAt 变化
+   * (新窗口)即重新武装。重启后状态从 kv 恢复,同窗口不重发。
+   * 窗口身份缺失(上游未给 resetAt)→ 保守不发:宁漏勿扰 —— 无身份即无法去重,
+   * 可能连环打扰。通知/写状态任何失败一律吞掉:通知是副作用,不污染渲染链;
+   * 通知成功才写状态(失败不写,下次取数重试 —— 通知侧宁重勿漏)。
+   */
+  function maybeNotify() {
+    if (!IS_BALL_INSTANCE) return Promise.resolve(); // 面板/主窗实例:零开销跳过
+    if (!isBallAlerting()) return Promise.resolve();
+    var resetAt = ballData && ballData.fiveHour ? ballData.fiveHour.resetAt : null;
+    if (!resetAt) return Promise.resolve(); // 窗口身份缺失:保守不发(宁漏勿扰)
+    var stateKey = KV_ALERT_STATE_PREFIX + ballAccount;
+    return pv.storage.get(stateKey).then(function (state) {
+      if (state && typeof state === 'object' && state.resetAt === resetAt) return; // 同窗口已发
+      var account = parseScope(ballAccount);
+      var meta = account ? PROVIDERS[account.provider] : null;
+      var name = (meta ? meta.label : (account ? account.provider : ballAccount)) +
+        (account && account.label !== 'default' ? ' · ' + account.label : '');
+      var body = tm('notifyBody')
+        .replace('{name}', name)
+        .replace('{pct}', String(ballData.fiveHour.percent))
+        .replace('{thr}', String(ballAlertCfg.threshold));
+      return pv.notify(tm('notifyTitle'), body).then(function () {
+        // 通知成功才写状态(通知失败不写,下次取数重试;写状态失败同窗口可能重发一次,
+        // 宁重勿漏)
+        return pv.storage.set(stateKey, { firedAt: new Date().toISOString(), resetAt: resetAt });
+      });
+    }).catch(function () {
+      /* 通知或状态写入失败:静默(通知是副作用,不污染渲染链;下次取数重新评估) */
+    });
+  }
+
+  /** 拉当前账号数据并渲染;失败:环保留缓存值 + 中心「!」+ tooltip 错误。
+   *  成功链在渲染前串行执行通知状态机 maybeNotify(通知与状态写入先于 renderBall
+   *  完成,并发双发窗口归零);maybeNotify 自吞全部失败,不影响错误态派生 */
   function refreshBallData() {
     if (!ballAccount) return Promise.resolve();
     var account = parseScope(ballAccount);
@@ -1147,6 +1195,8 @@
       ballData = data;
       ballError = null;
       return loadBallAlertCfg(); // 下次取数时读到面板新写入的阈值配置
+    }).then(function () {
+      return maybeNotify();
     }).then(function () {
       renderBall();
     }).catch(function (err) {
