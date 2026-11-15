@@ -1,7 +1,7 @@
 # 悬浮球用量告警 — UI 设计定稿(v2.0 特性)
 
-> 状态:**UI 层已落地(开工卡 J:阈值行/球告警态/卡片 chip/tooltip 行)**;
-> 通知发送、触发状态机、重启去重、跨窗同步待功能卡;目标版本 v2.0(插件版本届时升 1.1.0)。
+> 状态:**阈值告警已实现(开工卡 J:UI 层;开工卡 K v2:通知通道 + 触发状态机 +
+> 重启去重,插件 1.2.0)**;跨窗同步(面板写入主动推送)仍待后续。
 > 设计稿:`token-alert-ui.html`(本目录,双击可开,含可交互演示);亮暗双主题均已核对。
 > 视觉规格以设计稿为准;本文是其正式表述与编码交接清单。
 
@@ -23,6 +23,10 @@
 - **再武装**:窗口重置(`nextResetTime` 变化)或 5h% < 阈值 → 清除告警态。
 - **重启去重**:kv 持久化 `firedAt + resetAt`;同一窗口内重启应用不重发。
 - **通知文案**:标题「用量告警」;正文「{名称} 5 小时用量已达 {pct}%,超过阈值 {thr}%。」
+
+> **实现口径(功能卡 K v2)**:UI 告警态为活派生(每次渲染重算,pct < 阈值即灭);
+> 通知去重按窗口周期 —— `tm.alertState.<scope>` 记录已通知窗口的 resetAt,同窗口
+> 不重发、resetAt 变化即重新武装;评估仅球实例当前账号(轮询粒度)。
 
 ### 关键决策:球窗隐藏后继续评估
 
@@ -63,10 +67,13 @@
 
 ### Rust / 桥
 
-1. 新依赖 `tauri-plugin-notification`(+ capabilities 通知权限 + lib.rs 注册)。
-2. 桥面 pv-1 增量方法 **`pv.notify(title, body)`** —— manifest 权限新增 **`"notify"`**
-   (createBridge 闭包按 manifest 快照 fail-closed 判权,与 credential/net 同模式)。
-3. `plugins-src/token-monitor/manifest.json` permissions 增 `"notify"`;插件版本 → 1.1.0。
+1. ✅ 已实现(K v2):新依赖 `tauri-plugin-notification`(lib.rs 注册;通知经 Rust API
+   发送,不经其 JS 命令,**capabilities 零改动** —— 本文预估的「capabilities 通知权限」不需要)。
+2. ✅ 已实现(K v2):桥面 pv-1 增量方法 **`pv.notify(title, body)`** —— manifest 权限
+   新增 **`"notify"`**(createBridge 闭包按 manifest 快照 fail-closed 判权,与
+   credential/net 同模式;Rust 命令层 caller 仅限插件窗口,双闸)。
+3. ✅ 已实现(K v2):`plugins-src/token-monitor/manifest.json` permissions 增
+   `"notify"`;插件版本 → **1.2.0**(本文原预估 1.1.0,1.1.x 已被 1.1.1/1.1.2 修复版占用)。
 
 ### 插件 main.js
 

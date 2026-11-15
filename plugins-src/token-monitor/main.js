@@ -49,7 +49,7 @@
  *   cache:<provider>:<label> —— 每账号最近一次成功数据 + fetchedAt,失败不覆盖;
  *     label "default" 读取回落旧 cache:<provider>(旧单账号缓存兼容);
  *   tm.alert.<provider>:<label> —— 每账号告警阈值 {enabled,threshold}
- *     (键按账号 scope;单写者=面板实例,球实例只读;删除账号后键残留不清理);
+ *     (键按账号 scope;单写者=面板实例,球实例只读;删除账号时随链清理);
  *   tm.alertState.<provider>:<label> —— 通知去重状态 {firedAt,resetAt}(球实例写,
  *     键按账号 scope;resetAt = 已通知窗口的重置时间,同窗口不重发)。
  */
@@ -479,6 +479,8 @@
       alertTooltip: '已超阈值 {n}%',
       alertSwitch: '{label} 阈值告警开关',
       alertSlider: '{label} 告警阈值滑杆',
+      notifyTitle: '用量告警',
+      notifyBody: '{name} 5 小时用量已达 {pct}%,超过阈值 {thr}%。',
       pollLabel: '自动轮询(球窗常驻刷新)',
       pollInterval: '间隔(秒,≥120)',
       credFail: '凭据操作失败:',
@@ -520,6 +522,8 @@
       alertTooltip: 'Over threshold {n}%',
       alertSwitch: '{label} threshold alert switch',
       alertSlider: '{label} alert threshold slider',
+      notifyTitle: 'Usage alert',
+      notifyBody: '5-hour usage for {name} is at {pct}%, over the {thr}% threshold.',
       pollLabel: 'Auto poll (ball refresh)',
       pollInterval: 'Interval (sec, ≥120)',
       credFail: 'Credential operation failed: ',
@@ -1614,6 +1618,13 @@
             // 清该账号 cache(置 null:kv 无删除命令,读侧 null 即无数据)
             return pv.storage.set(KV_CACHE_PREFIX + scope, null);
           }).then(function () {
+            // 告警阈值与通知状态孤儿键同模式清理:读侧 null 即默认(阈值行)/
+            // 未通知(状态),球侧下次读取不残留已删账号的旧配置/旧窗口身份
+            return Promise.all([
+              pv.storage.set(KV_ALERT_PREFIX + scope, null),
+              pv.storage.set(KV_ALERT_STATE_PREFIX + scope, null),
+            ]);
+          }).then(function () {
             return ensureAccountsMigrated().then(function (accounts2) {
               var next = accounts2.filter(function (a) {
                 return accountScope(a) !== scope;
@@ -1633,7 +1644,7 @@
 
       /** 告警阈值行:每账号一行;配置读写仅面板实例(单写者),球实例只读。
        *  行重建只在账号列表变更时(rerender)—— 交互中不重建,以免打断滑杆拖动;
-       *  新增账号追加一行、删除账号行随清单消失(孤儿 kv 键不清理,清理归功能卡) */
+       *  新增账号追加一行、删除账号行随清单消失(孤儿键随删除链清理) */
       function renderAlertRows() {
         ensureAccountsMigrated().then(function (accounts) {
           alertList.innerHTML = '';

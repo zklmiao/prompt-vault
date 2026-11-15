@@ -1,6 +1,6 @@
 # Prompt Vault 待办与路线图
 
-> 最后更新:2026-11-14(P3 插件系统五批次完成;A9/A10 完成;token-monitor 1.1.1 发布——市场更新链 reload 小修 `2f33fcb`;1.1.2 修复球窗菜单不收起 `d248480`)。
+> 最后更新:2026-11-15(P3 插件系统五批次完成;A9/A10 完成;token-monitor 阈值告警功能卡 K v2 完成——通知通道/状态机/重启去重,插件 1.2.0;1.1.2 菜单收起修复 `d248480`)。
 > 维护约定:所有未完成的计划都写在这里,不要只留在聊天记录里;完成后把 `[ ]` 改为 `[x]`,并注明提交号或版本。
 > 状态基线:v0.1.0 已发布(GitHub Release 双资产),此后新增功能均已提交:拖拽导入与批量操作(`66cf56a`)、使用统计与可配置热键(`5957037`)、自绘标题栏(`29dea01`)、QuickPick 2.0(`430fbd5`)、命令面板与速查表(`62a6a51`);当前版本 **0.2.0-alpha**(2026-11-14 已升,v0.1.9-alpha 与 v0.1.9.2-alpha 已发布、后者附首轮全量回归报告;0.2.0-alpha 的 GitHub Release 待手动发布)。
 
@@ -108,7 +108,7 @@
 
 ### v2(已定,不承诺时间)
 
-- [ ] 悬浮球用量告警(UI 已落地,通知/状态机/跨窗同步待功能卡;设计定稿 `docs/designs/token-monitor-alert-ui.md`,存储键 `tm.alert.<provider>:<label>` 按账号粒度)
+- [ ] 悬浮球用量告警 —— **阈值告警已实现(通知/状态机)**(UI 卡 J + 功能卡 K v2,插件 1.2.0:通知通道 pv.notify 双闸 + `maybeNotify` 球实例独占 + `tm.alertState.<scope>` 窗口周期去重/重启不重发,夹具五断言自检);跨窗同步(面板写入主动推送)仍待后续;设计定稿 `docs/designs/token-monitor-alert-ui.md`
 - [ ] Claude(本地 `~/.claude/projects/**.jsonl` 统计 5h 窗口)、Codex(只读 `~/.codex/auth.json` OAuth + backend API)
 - [ ] 百炼、KiloPass(社区逆向端点,卡片标注「非官方接口,可能失效」)
 - [ ] 每供应商多账号 / MCP 标签过滤暴露 / 语言包扩展 / 第三方源签名评估

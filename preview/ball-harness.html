@@ -4,7 +4,8 @@
      用于亮/暗令牌与不同壁纸下的人工走查;「菜单收起自检」以断言回归菜单项
      点击收起路径(1.1.2 修复回归);「告警自检」以断言回归球告警态派生链
      (UI 卡 J:超阈值脉冲/徽标/tooltip 行 + 阈值抬高与开关关两条解除路径);
-     窗口尺寸/拖动等 Rust 行为一律 noop。 -->
+     「通知自检」以断言回归通知状态机(功能卡 K v2:触发/去重/再武装/开关关/
+     实例门);窗口尺寸/拖动等 Rust 行为一律 noop。 -->
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -55,10 +56,21 @@
       <button id="btn-menu">模拟右键</button>
       <button id="btn-selftest">菜单收起自检</button>
       <button id="btn-alerttest">告警自检</button>
+      <button id="btn-notifytest">通知自检</button>
     </div>
     <div class="selftest" id="selftest-result" data-fail=""></div>
     <div class="hint">球窗夹具:球体 + 右键菜单走查(窗口扩缩/拖动为 noop)</div>
     <script type="module">
+      // ---- 实例门:夹具即球窗环境 ----
+      // 宿主球窗分流 URL 即 index.html?plugin=<id>(批次 1 落地);夹具模拟球窗,
+      // 首开无参数时自跳转补参 —— main.js 的 IS_BALL_INSTANCE 正则打在真实
+      // location.search 上,与实机同路径;不带参数则通知状态机整体静默,
+      // 通知自检无意义(卡片断言⑤佐证该门在球窗环境为 true)
+      if (!/[?&]plugin=token-monitor(\b|[&=])/.test(location.search)) {
+        location.replace(location.pathname + "?plugin=token-monitor");
+        throw new Error("夹具需以 ?plugin=token-monitor 打开,已自动跳转");
+      }
+
       // ---- 最小 pv 桥:内存 kv + 罐头用量响应(与 preview/mock-core.ts 同形) ----
       var now = Date.now();
       var kv = new Map(Object.entries({
@@ -164,6 +176,12 @@
             return Promise.resolve({ status: 200, body: cannedNetBody(url) });
           },
         },
+        // 通知捕获 mock(必须先于 main.js 求值就位):记录调用供通知自检断言;
+        // 返回 Promise 贴合真实桥 Promise<void> 契约(maybeNotify 状态写链依赖 thenable)
+        notify: function (t, b) {
+          (window.__tmNotifyCalls = window.__tmNotifyCalls || []).push({ title: t, body: b });
+          return Promise.resolve();
+        },
         window: {
           setup: function (cfg) { pvWindowSetup = cfg; },
           resize: function () { return Promise.resolve(); },
@@ -182,7 +200,10 @@
       };
 
       const src = await fetch("/plugins-src/token-monitor/main.js").then(function (r) { return r.text(); });
-      (new Function("pv", '"use strict";\n' + src))(bridge);
+      // 末尾追加实例门读取器:IS_BALL_INSTANCE 是 IIFE 内 var,外层仅此一窥
+      // (通知自检断言⑤直断其 === true;面板实例 false 分支靠 dev 冒烟佐证)
+      (new Function("pv", '"use strict";\n' + src +
+        '\n;window.__tmIS_BALL_INSTANCE = IS_BALL_INSTANCE;'))(bridge);
       if (pvWindowSetup && typeof pvWindowSetup.onMount === "function") {
         pvWindowSetup.onMount(document.getElementById("ball-root"));
       }
@@ -296,7 +317,10 @@
           checks.push(["超阈值告警态", ball().classList.contains("pv-tm-alerting")]);
           checks.push(["脉冲图层常驻", !!ball().querySelector(".pv-tm-pulse")]);
           checks.push(["徽标显现", getComputedStyle(ball().querySelector(".pv-tm-badge")).display === "block"]);
-          checks.push(["tooltip 告警行", ball().title.indexOf("已超阈值 20%") >= 0]);
+          // tooltip 告警行:tm 文案随浏览器语言(zh 已超阈值 / en Over threshold),
+          // 断言双语言兼容(夹具原断言硬编码 zh,en 环境必假失败 —— 2026-11-15 实测抓出)
+          checks.push(["tooltip 告警行", ball().title.indexOf("已超阈值 20%") >= 0 ||
+            ball().title.indexOf("Over threshold 20%") >= 0]);
           // ② 阈值 100(23.5 < 100):解除
           kv.set(ALERT_KEY, { enabled: true, threshold: 100 });
           await refreshViaMenu();
@@ -308,7 +332,8 @@
           await refreshViaMenu();
           await waitFor(() => !ball().classList.contains("pv-tm-alerting"), 2000);
           checks.push(["开关关解除", !ball().classList.contains("pv-tm-alerting")]);
-          checks.push(["tooltip 无告警行", ball().title.indexOf("已超阈值") < 0]);
+          checks.push(["tooltip 无告警行", ball().title.indexOf("已超阈值") < 0 &&
+            ball().title.indexOf("Over threshold") < 0]);
           kv.delete(ALERT_KEY);
           const failed = checks.filter(([, ok]) => !ok);
           banner.textContent = "告警自检 " + (failed.length === 0 ? "全部通过" : "失败") + " — " +
@@ -316,6 +341,78 @@
           banner.dataset.fail = failed.length > 0 ? "1" : "";
         } catch (e) {
           banner.textContent = "告警自检异常:" + ((e && e.message) || e);
+          banner.dataset.fail = "1";
+        }
+      });
+
+      // ---- 回归自检:通知状态机(功能卡 K v2)----
+      // 阈值 20 + 罐头 glm:default 5h=23.5%(resetAt 全会话稳定:cache 与罐头响应
+      // 同源同值)→ 首刷恰发一条并写 state;同 resetAt 再刷不重发(窗口身份去重,
+      // 回落再回升也不重发的预期行为);state 换成旧窗口值(≠ 当次)再刷重发且
+      // state 更新为当次;开关关不发。面板实例门(无 plugin 参数环境)无法在单夹具
+      // 模拟,直断 IS_BALL_INSTANCE === true(断言⑤),false 分支靠 dev 冒烟佐证。
+      document.getElementById("btn-notifytest").addEventListener("click", async function () {
+        const banner = document.getElementById("selftest-result");
+        const checks = [];
+        try {
+          const calls = () => window.__tmNotifyCalls || [];
+          const stateKey = "tm.alertState.glm:default";
+          const cannedResetAt = kv.get("cache:glm:default").fiveHour.resetAt;
+          // 经菜单「立即刷新」驱动真实取数链(fetchAndCache → loadBallAlertCfg →
+          // maybeNotify → renderBall);fetchedAt 变化 = 本轮取数已写入 cache,
+          // 其后再等 60ms 让链尾(maybeNotify/renderBall)的微任务全部落定 ——
+          // 「不重发」的 absence 断言必须在链完全走完后判定,否则可能假 pass
+          const refreshAndSettle = async () => {
+            const before = kv.get("cache:glm:default").fetchedAt;
+            document.querySelector(".pv-tm-wrap")
+              .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+            const menuOf = () => document.querySelector(".pv-tm-menu");
+            await waitFor(() => menuOf() && !menuOf().hidden &&
+              menuOf().querySelectorAll(".pv-tm-menu-item").length > 0, 2000);
+            menuOf().querySelector(".pv-tm-menu-icon").closest(".pv-tm-menu-item").click();
+            await waitFor(() => menuOf().hidden, 2000);
+            await waitFor(() => kv.get("cache:glm:default").fetchedAt !== before, 2000);
+            await new Promise((r) => setTimeout(r, 60));
+          };
+          // ⑤ 实例门:夹具即球窗环境,IS_BALL_INSTANCE 必须为 true
+          checks.push(["实例门 IS_BALL_INSTANCE", window.__tmIS_BALL_INSTANCE === true]);
+          // ① 阈值 20 + state 为空 → 刷新 → 恰发一条,body 含名称与 23.5%/20%,state 写入
+          kv.set(ALERT_KEY, { enabled: true, threshold: 20 });
+          kv.delete(stateKey);
+          const calls0 = calls().length;
+          await refreshAndSettle();
+          await waitFor(() => calls().length > calls0, 2000);
+          checks.push(["首刷恰发一条", calls().length === calls0 + 1]);
+          const sent = calls()[calls().length - 1] || { body: "" };
+          checks.push(["body 含名称与数值", sent.body.indexOf("GLM Coding") >= 0 &&
+            sent.body.indexOf("23.5%") >= 0 && sent.body.indexOf("20%") >= 0]);
+          const st1 = kv.get(stateKey);
+          checks.push(["state 记录当次窗口", !!st1 && st1.resetAt === cannedResetAt]);
+          // ② state 同 resetAt → 刷新 → 不重发
+          const calls1 = calls().length;
+          await refreshAndSettle();
+          checks.push(["同窗口不重发", calls().length === calls1]);
+          // ③ state = 旧窗口(≠ 当次)→ 刷新 → 再发一次且 state 更新为当次(kv 读回)
+          kv.set(stateKey, { firedAt: "2000-01-01T00:00:00.000Z", resetAt: "2000-01-01T00:00:00.000Z" });
+          const calls2 = calls().length;
+          await refreshAndSettle();
+          await waitFor(() => calls().length > calls2, 2000);
+          checks.push(["旧窗口再武装重发", calls().length === calls2 + 1]);
+          const st3 = kv.get(stateKey);
+          checks.push(["state 更新为当次", !!st3 && st3.resetAt === cannedResetAt]);
+          // ④ 开关关(enabled:false)→ 刷新 → 不发
+          kv.set(ALERT_KEY, { enabled: false, threshold: 20 });
+          const calls3 = calls().length;
+          await refreshAndSettle();
+          checks.push(["开关关静默", calls().length === calls3]);
+          kv.delete(ALERT_KEY);
+          kv.delete(stateKey);
+          const failed = checks.filter(([, ok]) => !ok);
+          banner.textContent = "通知自检 " + (failed.length === 0 ? "全部通过" : "失败") + " — " +
+            checks.map(([name, ok]) => name + (ok ? " ✓" : " ✗")).join(" · ");
+          banner.dataset.fail = failed.length > 0 ? "1" : "";
+        } catch (e) {
+          banner.textContent = "通知自检异常:" + ((e && e.message) || e);
           banner.dataset.fail = "1";
         }
       });

@@ -1,7 +1,7 @@
 {
   "id": "token-monitor",
   "name": "Coding 套餐用量监控",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "minAppVersion": "0.2.0-alpha",
   "type": "standard",
   "ui": "window",
@@ -11,6 +11,7 @@
     "net:ark.cn-beijing.volcengineapi.com",
     "net:ark.ap-southeast.bytepluses.com",
     "net:opencode.ai",
+    "notify",
     "credential:glm",
     "credential:glm-intl",
     "credential:volcengine",
