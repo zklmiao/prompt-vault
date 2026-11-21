@@ -27,8 +27,8 @@ pub fn run_mcp() {
     mcp::run();
 }
 
-/// 首次启动时建议的数据文件位置(按共识默认指向工程内 data 目录)
-const DEFAULT_DATA_PATH: &str = r"E:\Agent\Proj\prompt-vault\data\prompts.json";
+/// 开发机烙进二进制的绝对路径常量已移除(审查报告 L7):首启动建议路径
+/// 改为运行时按用户环境推导(见 first_run_default_under)
 pub(crate) const MAIN_LABEL: &str = "main";
 const QUICKPICK_LABEL: &str = "quickpick";
 const QUICKPICK_WIDTH: f64 = 900.0;
@@ -489,14 +489,53 @@ fn path_meta(path: String) -> Option<PathMeta> {
     })
 }
 
-/// 首次启动给保存对话框的建议路径,并尽量预创建目录
+/// 首次启动给保存对话框的建议路径,并尽量预创建目录。
+/// 数据位置推导(审查报告 L7):开发机烙进二进制的绝对常量(E:\Agent\Proj\…)
+/// 在他人机器上目录创建静默失败、保存对话框建议无效路径;改为运行时按用户
+/// 环境推导 —— Documents 优先(用户可见,README「复制 JSON 即备份」哲学;
+/// OneDrive 重定向由 document_dir 正确处理),home 下 Documents 次之,
+/// APPDATA 最后兜底(与 config 同居)。dev 机 config 已存在,行为零变化。
 #[tauri::command]
-fn first_run_default() -> String {
-    let p = PathBuf::from(DEFAULT_DATA_PATH);
+fn first_run_default(app: AppHandle) -> String {
+    let docs = app
+        .path()
+        .document_dir()
+        .ok();
+    let home = std::env::var("USERPROFILE").ok().map(PathBuf::from);
+    let appdata = std::env::var("APPDATA").ok().map(PathBuf::from);
+    let p = first_run_default_under(
+        docs.as_deref(),
+        home.as_deref(),
+        appdata.as_deref(),
+    );
     if let Some(parent) = p.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    DEFAULT_DATA_PATH.to_string()
+    p.to_string_lossy().to_string()
+}
+
+/// 纯函数:首启动建议路径三级回退(docs 命中 → home 补 → appdata 兜底)。
+/// docs = Tauri document_dir()(含 OneDrive 重定向),home = USERPROFILE,
+/// appdata = APPDATA;全部缺失时按相对路径兜底(理论不可达,与 config_file_path
+/// 的 "." 回退一致)。
+fn first_run_default_under(
+    docs: Option<&Path>,
+    home: Option<&Path>,
+    appdata: Option<&Path>,
+) -> PathBuf {
+    if let Some(docs) = docs {
+        return docs.join("prompt-vault").join("prompts.json");
+    }
+    if let Some(home) = home {
+        return home
+            .join("Documents")
+            .join("prompt-vault")
+            .join("prompts.json");
+    }
+    if let Some(appdata) = appdata {
+        return appdata.join("prompt-vault").join("prompts.json");
+    }
+    PathBuf::from(".").join("prompt-vault").join("prompts.json")
 }
 
 #[tauri::command]
@@ -763,8 +802,52 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{bump_prompt_stats_in_json, iso_from_epoch_secs, write_config_to, AppConfig};
+    use super::{
+        bump_prompt_stats_in_json, first_run_default_under, iso_from_epoch_secs,
+        write_config_to, AppConfig,
+    };
     use std::path::PathBuf;
+
+    /// 首启动建议路径三级回退(审查报告 L7):docs 命中 / docs 缺 home 补 /
+    /// 全缺 appdata 兜底;tempdir 造真实目录验证拼接,绝不触碰真实用户目录。
+    /// (先败豁免:L7 是可移植性缺陷而非可复现崩溃,常量硬编码路径即现行为
+    /// 快照,无可失败断言的既有断言面 —— 三 vector 随修复新增,见测试报告。)
+    #[test]
+    fn first_run_default_under_three_tier_fallback() {
+        let base = std::env::temp_dir().join(format!(
+            "pv-first-run-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let docs = PathBuf::from(&base).join("Documents");
+        let home = PathBuf::from(&base).join("home");
+        let appdata = PathBuf::from(&base).join("appdata");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&appdata).unwrap();
+
+        // ① docs 命中(运行时 document_dir 成功,含 OneDrive 重定向语义)
+        assert_eq!(
+            first_run_default_under(Some(&docs), Some(&home), Some(&appdata)),
+            docs.join("prompt-vault").join("prompts.json")
+        );
+        // ② docs 缺(笔记本未接 OneDrive / 推导失败)→ home 下 Documents
+        assert_eq!(
+            first_run_default_under(None, Some(&home), Some(&appdata)),
+            home.join("Documents").join("prompt-vault").join("prompts.json")
+        );
+        // ③ 全缺 → APPDATA 兜底(与 config 同居)
+        assert_eq!(
+            first_run_default_under(None, None, Some(&appdata)),
+            appdata.join("prompt-vault").join("prompts.json")
+        );
+        // ④ 全缺(理论不可达)→ 相对路径兜底,确定性不 panic
+        assert_eq!(
+            first_run_default_under(None, None, None),
+            PathBuf::from(".").join("prompt-vault").join("prompts.json")
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     /// config.json 原子写回归(审查报告 L1):同一路径连写两次,断言
     /// ① `.bak` 存在且内容为第一次写入的旧配置(崩溃时可人工恢复的回滚点)
