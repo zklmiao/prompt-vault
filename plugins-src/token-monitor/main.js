@@ -51,7 +51,9 @@
  *   tm.alert.<provider>:<label> —— 每账号告警阈值 {enabled,threshold}
  *     (键按账号 scope;单写者=面板实例,球实例只读;删除账号时随链清理);
  *   tm.alertState.<provider>:<label> —— 通知去重状态 {firedAt,resetAt}(球实例写,
- *     键按账号 scope;resetAt = 已通知窗口的重置时间,同窗口不重发)。
+ *     键按账号 scope;resetAt = 已通知窗口的重置时间,同窗口不重发;评估入口
+ *     maybeNotifyFor(account, data, cfg) 按账号传参,轮转周期内每账号刷完即评,
+ *     resetAt ≤ now 的已结束窗口不发)。
  */
 
   // ============ 实例门:球实例 ============
@@ -59,7 +61,7 @@
   // 球实例判定:宿主 PluginWindow 分流 URL 即 index.html?plugin=<id>(批次 1 落地),
   // 面板实例(主窗注入)无该参数 → false。打在真实 location.search 上,不依赖
   // __TAURI_INTERNALS__(纯浏览器夹具同路径可用);与 IS_BALL_WINDOW(窗口 label
-  // 判定,清单单写者语义)互补。通知职责由球实例独占,maybeNotify 零开销跳过面板实例
+  // 判定,清单单写者语义)互补。通知职责由球实例独占,maybeNotifyFor 零开销跳过面板实例
   var IS_BALL_INSTANCE = /[?&]plugin=token-monitor(\b|[&=])/.test(location.search);
 
   // ============ 常量:五家供应商的取数契约(端点事实见设计文档附录 A,2026-11 核实) ============
@@ -1154,35 +1156,37 @@
   }
 
   /**
-   * 通知状态机(edge-trigger,每窗口周期最多一条;球实例独占,面板实例零开销跳过)。
-   * 去重按窗口周期:tm.alertState.<scope> 记录已通知窗口的 resetAt,与当次相同 →
-   * 不重发(同窗口回落再回升也不重发,resetAt 是窗口身份,预期行为);resetAt 变化
-   * (新窗口)即重新武装。重启后状态从 kv 恢复,同窗口不重发。
+   * 通知状态机(edge-trigger,每账号每窗口周期最多一条;球实例独占,面板实例零开销跳过)。
+   * 按账号传参评估(不再读模块单值 ballData/ballAlertCfg):轮转周期(P2)内每账号
+   * 刷完即评,「立即刷新」等当前账号路径同此入口。去重按窗口周期:tm.alertState.<scope>
+   * 记录已通知窗口的 resetAt,与当次相同 → 不重发(同窗口回落再回升也不重发,
+   * resetAt 是窗口身份,预期行为);resetAt 变化(新窗口)即重新武装。重启后状态从
+   * kv 恢复,同窗口不重发。
    * 窗口身份缺失(上游未给 resetAt)→ 保守不发:宁漏勿扰 —— 无身份即无法去重,
-   * 可能连环打扰。通知/写状态任何失败一律吞掉:通知是副作用,不污染渲染链;
+   * 可能连环打扰。窗口已结束(resetAt ≤ now,M3)→ 不发:过期数据可能源于通知失败
+   * 重启后载入的过期 cache 或上游滞后的已结束窗口,基于它发通知是误报。
+   * 通知/写状态任何失败一律吞掉:通知是副作用,不污染渲染链;
    * 通知成功才写状态(失败不写,下次取数重试 —— 通知侧宁重勿漏)。
    */
-  function maybeNotify() {
+  function maybeNotifyFor(account, data, cfg) {
     if (!IS_BALL_INSTANCE) return Promise.resolve(); // 面板/主窗实例:零开销跳过
-    if (!isBallAlerting()) return Promise.resolve();
-    var resetAt = ballData && ballData.fiveHour ? ballData.fiveHour.resetAt : null;
+    var pct = data && data.fiveHour ? data.fiveHour.percent : null;
+    if (!isAlerting(cfg, pct, false)) return Promise.resolve();
+    var resetAt = data && data.fiveHour ? data.fiveHour.resetAt : null;
     if (!resetAt) return Promise.resolve(); // 窗口身份缺失:保守不发(宁漏勿扰)
-    // M3(审查报告 2026-11-21):窗口已结束的过期数据不发通知(宁漏勿扰)——
-    // 通知失败重启后载入的过期 cache、上游滞后的已结束窗口,不再基于过期数据
-    // 发真通知(当前实际用量可能已因窗口重置归零);UI 层徽标保持现状(短暂
-    // 显示后由首刷纠正,可接受)
+    // M3 时效守卫:窗口已结束的过期数据不发通知(宁漏勿扰)—— 通知失败重启后
+    // 载入的过期 cache、上游滞后的已结束窗口,不再基于过期数据发真通知
     if (new Date(resetAt).getTime() <= Date.now()) return Promise.resolve();
-    var stateKey = KV_ALERT_STATE_PREFIX + ballAccount;
+    var stateKey = KV_ALERT_STATE_PREFIX + accountScope(account);
     return pv.storage.get(stateKey).then(function (state) {
       if (state && typeof state === 'object' && state.resetAt === resetAt) return; // 同窗口已发
-      var account = parseScope(ballAccount);
-      var meta = account ? PROVIDERS[account.provider] : null;
-      var name = (meta ? meta.label : (account ? account.provider : ballAccount)) +
-        (account && account.label !== 'default' ? ' · ' + account.label : '');
+      var meta = PROVIDERS[account.provider];
+      var name = (meta ? meta.label : account.provider) +
+        (account.label !== 'default' ? ' · ' + account.label : '');
       var body = tm('notifyBody')
         .replace('{name}', name)
-        .replace('{pct}', String(ballData.fiveHour.percent))
-        .replace('{thr}', String(ballAlertCfg.threshold));
+        .replace('{pct}', String(data.fiveHour.percent))
+        .replace('{thr}', String(cfg.threshold));
       return pv.notify(tm('notifyTitle'), body).then(function () {
         // 通知成功才写状态(通知失败不写,下次取数重试;写状态失败同窗口可能重发一次,
         // 宁重勿漏)
@@ -1193,25 +1197,55 @@
     });
   }
 
-  /** 拉当前账号数据并渲染;失败:环保留缓存值 + 中心「!」+ tooltip 错误。
-   *  成功链在渲染前串行执行通知状态机 maybeNotify(通知与状态写入先于 renderBall
-   *  完成,并发双发窗口归零);maybeNotify 自吞全部失败,不影响错误态派生 */
+  /**
+   * 轮转周期原子步:该账号 readAlertCfg → fetchAndCache → 成功即按账号评估通知;
+   * 当前账号额外同步球显示链(ballData/ballAlertCfg/ballError),通知与状态写入
+   * 先于 renderBall 完成(并发双发窗口归零)。失败:cache 不覆盖(既有语义),
+   * 仅当前账号设 ballError 提示,非当前账号静默跳过(监测盲区由下轮周期补)。
+   */
+  function refreshAccountCycleStep(account) {
+    var scope = accountScope(account);
+    return readAlertCfg(account).then(function (cfg) {
+      return fetchAndCache(account).then(function (data) {
+        if (ballAccount === scope) {
+          ballData = data;
+          ballError = null;
+          ballAlertCfg = cfg;
+        }
+        return maybeNotifyFor(account, data, cfg).then(function () {
+          if (ballAccount === scope) renderBall();
+        });
+      });
+    }).catch(function (err) {
+      if (ballAccount === scope) {
+        ballError = (err && err.message) || String(err);
+        renderBall();
+      }
+    });
+  }
+
+  /** 拉当前账号数据并渲染(= 轮转周期原子步的当前账号单步;菜单「立即刷新」/
+   *  账号切换/挂载首刷共用);失败:环保留缓存值 + 中心「!」+ tooltip 错误 */
   function refreshBallData() {
     if (!ballAccount) return Promise.resolve();
     var account = parseScope(ballAccount);
     if (!account) return Promise.resolve();
-    return fetchAndCache(account).then(function (data) {
-      ballData = data;
-      ballError = null;
-      return loadBallAlertCfg(); // 下次取数时读到面板新写入的阈值配置
-    }).then(function () {
-      return maybeNotify();
-    }).then(function () {
-      renderBall();
-    }).catch(function (err) {
-      ballError = (err && err.message) || String(err);
-      renderBall();
-    });
+    return refreshAccountCycleStep(account);
+  }
+
+  /** 告警轮转周期(P2):对全部账号串行 fetchAndCache,每账号刷完即独立评估通知
+   *  —— 原 tick 仅刷当前账号,N 账号任意时刻仅 1 个被监测的盲区消除;
+   *  N×15s 单账号取数超时上界 vs ≥120s 轮询下限(N≤5 成立),重入守卫兜底任意 N */
+  function runAlertCycle(accounts) {
+    var chain = Promise.resolve();
+    for (var i = 0; i < accounts.length; i++) {
+      (function (account) {
+        chain = chain.then(function () {
+          return refreshAccountCycleStep(account);
+        });
+      })(accounts[i]);
+    }
+    return chain;
   }
 
   /** 轮询生命周期(§5.2):球实例持有 —— mount 且 ball.poll.enabled 即启;
@@ -1239,9 +1273,14 @@
     }).catch(function () { /* 配置读取失败:保持手动模式 */ });
   }
 
-  /** tick:重读账号视图同步清单(删除/失效账号自动让位),再刷新当前账号;
-   *  单序列不重叠(interval ≥120s,单次取数整体超时 15s) */
+  /** tick:重读账号视图同步清单(删除/失效账号自动让位),再对全部账号串行轮转
+   *  刷新(原仅当前账号 → 其余账号监测盲区,P2);in-flight 重入守卫:上一轮
+   *  未完新 tick 到点直接跳过(interval ≥120s vs N×15s 超时上界,N≤5 成立,
+   *  守卫兜底任意 N) */
+  var cycleInFlight = false;
   function tickBall() {
+    if (cycleInFlight) return;
+    cycleInFlight = true;
     loadBallAccounts().then(function (accounts) {
       if (accounts.length === 0) {
         ballNoConfigured = true;
@@ -1253,13 +1292,21 @@
       }
       var ids = accounts.map(function (a) { return accountScope(a); });
       if (ids.indexOf(ballAccount) < 0) {
-        setAccount(ids[0], accounts); // 当前账号已被删除/失效:切到清单首个
-        return;
+        // 当前账号已被删除/失效:切到清单首个(仅切选择与显示,取数由本轮 cycle
+        // 覆盖;不走 setAccount —— 其独立取数链会与本轮 cycle 重复 fetch)
+        ballNoConfigured = false;
+        ballAccount = ids[0];
+        ballData = null;
+        ballError = null;
+        renderBall();
+        pv.storage.set(KV_PROVIDER, ballAccount).catch(function () {});
       }
-      refreshBallData();
+      return runAlertCycle(accounts);
     }).catch(function (err) {
       ballError = (err && err.message) || String(err);
       renderBall();
+    }).then(function () {
+      cycleInFlight = false;
     });
   }
 
