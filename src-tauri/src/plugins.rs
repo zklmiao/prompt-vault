@@ -121,6 +121,10 @@ impl PluginRoot {
     /// 解析当前版本目录;指针缺失/指向不存在时返回 None
     fn resolve_version_dir(&self, id: &str) -> Option<PathBuf> {
         let version = self.current_version(id)?;
+        // H1:已落盘的污染指针(如既往穿越安装写入的 "../../evil")防跨重启命中
+        // —— 版本名非 semver 一律拒绝 join,读取链(plugin_read_entry /
+        // plugin_installed_manifest)不从穿越目录注入源码
+        parse_semver(&version)?;
         let dir = self.store_dir(id).join(version);
         dir.is_dir().then_some(dir)
     }
@@ -439,6 +443,12 @@ fn parse_channel_ref(v: &Value) -> Option<ChannelRef> {
     let url = v.get("url")?.as_str()?.trim();
     let sha256 = v.get("sha256")?.as_str()?.trim();
     if version.is_empty() || url.is_empty() || sha256.is_empty() {
+        return None;
+    }
+    // H1 契约收紧:市场版本要求严格 semver(先例 1.0.0/1.1.2/1.2.0 全部合规)。
+    // 版本串会参与 store_dir(id).join(version) 落盘路径,非 semver 形状(相对
+    // 穿越/绝对路径/多级/缺位)一律拒绝;坏条目跳过不拖垮清单(既有模式)
+    if parse_semver(version).is_none() {
         return None;
     }
     // 此处只做 scheme 前缀初筛;真正下载时会走 validate_url + SSRF 全量校验
@@ -874,6 +884,14 @@ fn install_from_bytes(
     if manifest_version != expect_version {
         return Err(InstallError::Other(format!(
             "插件包版本({manifest_version})与清单条目({expect_version})不一致,已拒绝安装"
+        )));
+    }
+    // H1:版本串参与 store_dir join,必须严格 semver —— 拒绝相对穿越/绝对路径/
+    // 多级等非法形状(清单侧 parse_channel_ref 已同规则收紧;manifest 与
+    // expect_version 已断言相等,此处校验同时消除两者流入落盘路径的 taint)
+    if parse_semver(manifest_version).is_none() {
+        return Err(InstallError::Other(format!(
+            "插件版本号不合法(需 semver major.minor.patch):{manifest_version}"
         )));
     }
     if let Some(min_app) = manifest.get("minAppVersion").and_then(|v| v.as_str()) {
@@ -2323,6 +2341,85 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, InstallError::Other(ref m) if m.contains("不一致")));
         assert!(!root.store_dir("demo-hello").exists(), "校验不符不应落盘");
+    }
+
+    /// H1 审查报告(2026-11-21)回归:清单版本串路径穿越三形态。expect_version 会
+    /// 直达 store_dir(id).join(expect_version)(:898):相对 `..` 逐级逃逸、绝对路径
+    /// 整体替换基路径、semver 夹带穿越段;zip 内 manifest version 与清单同为攻击者
+    /// 控制,一致性断言不设防。断言:Err(版本形状校验)+ store 与逃逸路径均无落盘。
+    #[test]
+    fn install_rejects_path_traversal_versions() {
+        for v in ["../../evil", "C:\\evil", "1.0.0/../../x"] {
+            let root = temp_root("install-traverse");
+            // json! 宏负责 JSON 转义(如 C:\evil → "C:\\evil"),与 manifest 逐字一致
+            let manifest = json!({
+                "id": "demo-hello", "name": "演示插件", "version": v,
+                "type": "standard", "ui": "none", "permissions": []
+            })
+            .to_string();
+            let zip_bytes = make_zip(&[("manifest.json", manifest.as_bytes())], &[]);
+            let result = install_from_bytes(
+                &root, &zip_bytes, &sha_of(&zip_bytes), "release", "demo-hello", v,
+                "0.1.9-alpha.2", None,
+            );
+            // 修复前这些向量会真实落盘到穿越路径(root 外/盘根),先尽力清理演示残留
+            // 再断言;若清理目标不存在则幂等成功
+            let root_dir = root.0.clone(); // 测试子模块可访问私有字段
+            let _ = std::fs::remove_dir_all(root_dir.join("evil"));
+            let _ = std::fs::remove_dir_all(root_dir.join("store").join("x"));
+            let _ = std::fs::remove_dir_all("C:\\evil");
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, InstallError::Other(ref m) if m.contains("版本号不合法")),
+                "向量 {v} 应报版本形状校验错误,实际:{err:?}"
+            );
+            assert!(!root.store_dir("demo-hello").exists(), "向量 {v} 拒绝后 store 不应落盘");
+            assert!(!root_dir.join("evil").exists(), "向量 {v} 逃逸路径不应存在");
+            assert!(
+                !root_dir.join("store").join("x").exists(),
+                "向量 {v} 半穿越路径不应存在"
+            );
+        }
+    }
+
+    /// H1 回归:已污染的 current 指针跨重启不得命中(resolve_version_dir 校验)。
+    /// 指针内容 "../../evil" 指向的逃逸目录被真实创建 —— 修复前 join 后 .is_dir()
+    /// 命中返回 Some,plugin_read_entry 等读取链会继续从穿越目录注入源码。
+    #[test]
+    fn resolve_version_dir_rejects_non_semver_pointer() {
+        let root = temp_root("resolve-poisoned");
+        std::fs::create_dir_all(root.store_dir("demo-hello")).unwrap();
+        let poisoned = root.0.join("evil");
+        std::fs::create_dir_all(&poisoned).unwrap();
+        root.set_current_version("demo-hello", "../../evil").unwrap();
+        assert!(
+            root.resolve_version_dir("demo-hello").is_none(),
+            "非 semver 指针应被拒绝(即使逃逸目录存在)"
+        );
+        // 合法指针不受影响
+        let good = root.store_dir("demo-hello").join("1.2.1");
+        std::fs::create_dir_all(&good).unwrap();
+        root.set_current_version("demo-hello", "1.2.1").unwrap();
+        assert_eq!(root.resolve_version_dir("demo-hello"), Some(good));
+    }
+
+    /// H1 契约收紧:市场通道版本要求严格 semver(先例 1.0.0/1.1.2/1.2.0 全部合规);
+    /// 非 semver 形状的条目整体跳过(坏条目不拖垮清单,既有模式)。
+    #[test]
+    fn channel_ref_rejects_non_semver_versions() {
+        let raw = manifest_json(
+            r#"[
+            { "id": "ok-semver", "name": "合法", "channels": { "release": { "version": "1.2.1", "url": "https://x/1.zip", "sha256": "aa" } } },
+            { "id": "bad-parent", "name": "相对穿越", "channels": { "release": { "version": "../../evil", "url": "https://x/2.zip", "sha256": "bb" } } },
+            { "id": "bad-abs", "name": "绝对路径", "channels": { "release": { "version": "C:\\evil", "url": "https://x/3.zip", "sha256": "cc" } } },
+            { "id": "bad-mixed", "name": "semver 混穿越", "channels": { "release": { "version": "1.0.0/../../x", "url": "https://x/4.zip", "sha256": "dd" } } },
+            { "id": "bad-partial", "name": "两位版本", "channels": { "beta": { "version": "1.2", "url": "https://x/5.zip", "sha256": "ee" } } }
+        ]"#,
+        );
+        let manifest = parse_source_manifest(&raw).unwrap();
+        assert_eq!(manifest.plugins.len(), 1, "非 semver 版本的条目应全部跳过");
+        assert_eq!(manifest.plugins[0].id, "ok-semver");
+        assert_eq!(manifest.plugins[0].release.as_ref().unwrap().version, "1.2.1");
     }
 
     #[test]
