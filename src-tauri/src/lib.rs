@@ -89,12 +89,18 @@ pub(crate) fn read_config() -> AppConfig {
 }
 
 fn write_config(cfg: &AppConfig) -> Result<(), String> {
-    let path = config_file_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    write_config_to(&config_file_path(), cfg)
+}
+
+/// 落盘 config.json(路径注入形,便于测试用临时目录、绝不触碰真实 APPDATA)。
+/// 复用 write_atomic(审查报告 L1):裸 fs::write 在崩溃/断电窗口会截断文件,
+/// read_config 解析失败 unwrap_or_default 后 data_path/hotkeys 静默丢失回默认;
+/// 原子写自带 .bak 滚动备份,热键/窗口态每次写入均产生备份属预期(数据文件同款)。
+/// 调用点 set_data_path/set_hotkeys/save_main_window_state 均不在 data_lock 内,
+/// 无嵌套锁死锁面。read_config 对损坏主文件回退 .bak 属防御纵深,非本根因,不在此改。
+fn write_config_to(path: &Path, cfg: &AppConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())
+    crate::write_atomic(path, &json)
 }
 
 pub(crate) fn show_main_window(app: &AppHandle) {
@@ -757,7 +763,49 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{bump_prompt_stats_in_json, iso_from_epoch_secs};
+    use super::{bump_prompt_stats_in_json, iso_from_epoch_secs, write_config_to, AppConfig};
+    use std::path::PathBuf;
+
+    /// config.json 原子写回归(审查报告 L1):同一路径连写两次,断言
+    /// ① `.bak` 存在且内容为第一次写入的旧配置(崩溃时可人工恢复的回滚点)
+    /// ② 主文件为新配置且可解析回 cfg2。
+    /// 修复前 write_config_to 用裸 fs::write,无 .bak → 断言①红(先败证据)。
+    /// tempdir 自造,绝不触碰真实 APPDATA。
+    #[test]
+    fn write_config_to_keeps_backup_and_parses_new() {
+        let dir = std::env::temp_dir().join(format!(
+            "pv-config-test-{}-atomic",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = PathBuf::from(&dir).join("config.json");
+        let cfg1 = AppConfig {
+            data_path: Some("C:\\first\\prompts.json".to_string()),
+            ..Default::default()
+        };
+        let cfg2 = AppConfig {
+            data_path: Some("C:\\second\\prompts.json".to_string()),
+            ..Default::default()
+        };
+        write_config_to(&path, &cfg1).expect("第一次写入应成功");
+        write_config_to(&path, &cfg2).expect("第二次写入应成功");
+        // ① 滚动备份:第二次写入后 .bak 内容 = cfg1
+        let bak_path = PathBuf::from(format!("{}.bak", path.display()));
+        assert!(bak_path.exists(), "第二次写入后应存在 .bak 备份(先败:裸写无 .bak)");
+        let bak: AppConfig = serde_json::from_str(
+            &std::fs::read_to_string(&bak_path).expect(".bak 应可读"),
+        )
+        .expect(".bak 应为合法 config JSON");
+        assert_eq!(bak.data_path.as_deref(), Some("C:\\first\\prompts.json"));
+        // ② 主文件 = 新配置且可解析
+        let main: AppConfig = serde_json::from_str(
+            &std::fs::read_to_string(&path).expect("config.json 应可读"),
+        )
+        .expect("config.json 应为合法 config JSON");
+        assert_eq!(main.data_path.as_deref(), Some("C:\\second\\prompts.json"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     const SAMPLE: &str = r#"{
   "version": 1,
