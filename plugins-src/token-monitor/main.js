@@ -1167,6 +1167,11 @@
     if (!isBallAlerting()) return Promise.resolve();
     var resetAt = ballData && ballData.fiveHour ? ballData.fiveHour.resetAt : null;
     if (!resetAt) return Promise.resolve(); // 窗口身份缺失:保守不发(宁漏勿扰)
+    // M3(审查报告 2026-11-21):窗口已结束的过期数据不发通知(宁漏勿扰)——
+    // 通知失败重启后载入的过期 cache、上游滞后的已结束窗口,不再基于过期数据
+    // 发真通知(当前实际用量可能已因窗口重置归零);UI 层徽标保持现状(短暂
+    // 显示后由首刷纠正,可接受)
+    if (new Date(resetAt).getTime() <= Date.now()) return Promise.resolve();
     var stateKey = KV_ALERT_STATE_PREFIX + ballAccount;
     return pv.storage.get(stateKey).then(function (state) {
       if (state && typeof state === 'object' && state.resetAt === resetAt) return; // 同窗口已发

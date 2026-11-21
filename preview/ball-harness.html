@@ -57,6 +57,8 @@
       <button id="btn-selftest">菜单收起自检</button>
       <button id="btn-alerttest">告警自检</button>
       <button id="btn-notifytest">通知自检</button>
+      <button id="btn-expirytest">时效自检</button>
+      <button id="btn-cycletest">轮转自检</button>
     </div>
     <div class="selftest" id="selftest-result" data-fail=""></div>
     <div class="hint">球窗夹具:球体 + 右键菜单走查(窗口扩缩/拖动为 noop)</div>
@@ -117,13 +119,19 @@
         },
       }));
 
+      // ---- 可注入罐头:GLM 5h 窗口 resetAt 默认「未来 2h+13m」;时效自检(D 条)
+      // 改写为过去时刻以复现 M3 的机械触发点(maybeNotify 评估时 ballData.fiveHour
+      // .resetAt ≤ now —— 实机链路的触发面:通知失败重启后载入过期 cache,或上游
+      // 返回已结束窗口),用后还原避免污染其余自检
+      var cannedGlm5hResetMs = now + 2 * 3600e3 + 13 * 60e3;
+
       function cannedNetBody(url) {
         if (url.includes("/api/monitor/usage/quota/limit")) {
           return JSON.stringify({
             data: {
               level: "pro",
               limits: [
-                { type: "TOKENS_LIMIT", percentage: 23.5, nextResetTime: now + 2 * 3600e3 + 13 * 60e3 },
+                { type: "TOKENS_LIMIT", percentage: 23.5, nextResetTime: cannedGlm5hResetMs },
                 { type: "TOKENS_LIMIT", percentage: 61.2, nextResetTime: now + 3 * 86400e3 },
                 { type: "TIME_LIMIT", currentValue: 800, usage: 230, remaining: 570 },
               ],
@@ -200,10 +208,17 @@
       };
 
       const src = await fetch("/plugins-src/token-monitor/main.js").then(function (r) { return r.text(); });
-      // 末尾追加实例门读取器:IS_BALL_INSTANCE 是 IIFE 内 var,外层仅此一窥
-      // (通知自检断言⑤直断其 === true;面板实例 false 分支靠 dev 冒烟佐证)
+      // 末尾追加实例门读取器与内部函数钩子:IS_BALL_INSTANCE / tickBall 等是 IIFE 内
+      // var,外层仅经此一窥(通知自检断言⑤直断 IS_BALL_INSTANCE === true;轮转自检
+      // 直接调 tickBall 驱动周期,规避真实下限 120s 太长 —— 卡面允许的 harness 手段,
+      // 见工作报告实现决策;面板实例 false 分支靠 dev 冒烟佐证)
       (new Function("pv", '"use strict";\n' + src +
-        '\n;window.__tmIS_BALL_INSTANCE = IS_BALL_INSTANCE;'))(bridge);
+        '\n;window.__tmIS_BALL_INSTANCE = IS_BALL_INSTANCE;' +
+        '\n;window.__tmHarness = {' +
+        '  tickBall: tickBall,' +
+        '  loadBallAccounts: loadBallAccounts,' +
+        '  refreshBallData: refreshBallData' +
+        '};'))(bridge);
       if (pvWindowSetup && typeof pvWindowSetup.onMount === "function") {
         pvWindowSetup.onMount(document.getElementById("ball-root"));
       }
@@ -413,6 +428,132 @@
           banner.dataset.fail = failed.length > 0 ? "1" : "";
         } catch (e) {
           banner.textContent = "通知自检异常:" + ((e && e.message) || e);
+          banner.dataset.fail = "1";
+        }
+      });
+
+      // ---- 回归自检:通知状态机时效门(修复卡 L · D 条,M3)----
+      // 预置超阈值配置 + 罐头返回「已结束窗口」(resetAt=过去;取数链会把过期值
+      // 写进 cache,与实机「重启载入过期 cache」的评估面同一点)→ 驱动真实取数链
+      // → 断言不发通知(宁漏勿扰);修复前 maybeNotify 不判时效,基于过期数据发
+      // 真通知。说明:夹具内 ballData 只能经取数链进入(refreshBallData 成功链),
+      // 故以「取数返回已结束窗口」复现同一机械触发点(maybeNotify 评估时
+      // resetAt ≤ now);实机「重启 + 过期 cache + 上次通知失败」由 dev 冒烟④覆盖。
+      document.getElementById("btn-expirytest").addEventListener("click", async function () {
+        const banner = document.getElementById("selftest-result");
+        const checks = [];
+        try {
+          const calls = () => window.__tmNotifyCalls || [];
+          const stateKey = "tm.alertState.glm:default";
+          const defaultReset = now + 2 * 3600e3 + 13 * 60e3;
+          const refreshAndSettle = async () => {
+            const before = kv.get("cache:glm:default") &&
+              kv.get("cache:glm:default").fetchedAt;
+            document.querySelector(".pv-tm-wrap")
+              .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+            const menuOf = () => document.querySelector(".pv-tm-menu");
+            await waitFor(() => menuOf() && !menuOf().hidden &&
+              menuOf().querySelectorAll(".pv-tm-menu-item").length > 0, 2000);
+            menuOf().querySelector(".pv-tm-menu-icon").closest(".pv-tm-menu-item").click();
+            await waitFor(() => menuOf().hidden, 2000);
+            await waitFor(() => {
+              const c = kv.get("cache:glm:default");
+              return c && c.fetchedAt !== before;
+            }, 2000);
+            await new Promise((r) => setTimeout(r, 60));
+          };
+          // 预置:超阈值配置 + 去重状态清空 + 罐头切「已结束窗口」(过去 60s)
+          kv.set("tm.alert.glm:default", { enabled: true, threshold: 20 });
+          kv.delete(stateKey);
+          cannedGlm5hResetMs = Date.now() - 60e3;
+          const calls0 = calls().length;
+          await refreshAndSettle();
+          await new Promise((r) => setTimeout(r, 120)); // absence 断言:链尾微任务全部落定
+          checks.push(["过期窗口不发通知", calls().length === calls0]);
+          // 还原:罐头回未来值;先关告警开关再补一次刷新,把 cache 的 resetAt 写回
+          // 未来值(其余自检读 cache:glm:default 的 resetAt 作基准,不能残留过期值),
+          // 还原刷新不触发通知(开关关)
+          cannedGlm5hResetMs = defaultReset;
+          kv.set("tm.alert.glm:default", { enabled: false, threshold: 20 });
+          await refreshAndSettle();
+          kv.delete("tm.alert.glm:default");
+          kv.delete(stateKey);
+          const failed = checks.filter(([, ok]) => !ok);
+          banner.textContent = "时效自检 " + (failed.length === 0 ? "全部通过" : "失败") + " — " +
+            checks.map(([name, ok]) => name + (ok ? " ✓" : " ✗")).join(" · ");
+          banner.dataset.fail = failed.length > 0 ? "1" : "";
+        } catch (e) {
+          banner.textContent = "时效自检异常:" + ((e && e.message) || e);
+          banner.dataset.fail = "1";
+        }
+      });
+
+      // ---- 回归自检:轮询全账号轮转 + 重入守卫(修复卡 L · E 条,P2)----
+      // 夹具 5 账号(当前 glm:default + glm:备用 / glm-intl / volcengine / opencode),
+      // 罐头响应覆盖 volcengine(Action=GetAFPUsage)与 opencode(zen/go/v1/usage);
+      // 直接调 tickBall 驱动周期(真实下限 120s 太长 —— 卡面允许的 harness 手段,
+      // 经 __tmHarness 暴露内部函数,见工作报告实现决策),断言:
+      // ① 一个周期内全部账号 cache 均被刷新(修复前仅当前账号 glm:default 被刷,
+      //   非当前账号 waitFor 超时失败);② in-flight 守卫:周期进行中再次 tick 被跳过
+      //   (取数调用数增量 = 单周期基线,不翻倍)。GLM 系每账号 2 次取数请求
+      //   (quota/limit + model-usage),火山/OpenCode 各 1 次。
+      document.getElementById("btn-cycletest").addEventListener("click", async function () {
+        const banner = document.getElementById("selftest-result");
+        const checks = [];
+        try {
+          const fetchedAt = (scope) => {
+            const c = kv.get("cache:" + scope);
+            return c ? c.fetchedAt : null;
+          };
+          // 取数调用计数钩子(先于任何 tick 挂上;自检结束还原)
+          const prevFetch = bridge.net.fetch;
+          window.__tmFetchCalls = [];
+          bridge.net.fetch = function (url) {
+            window.__tmFetchCalls.push(url);
+            return prevFetch.call(bridge.net, url);
+          };
+          const settleCycle = async () => {
+            // 等取数调用数连续 200ms 无新调用,即本轮周期落定
+            let last = -1;
+            for (;;) {
+              const cur = window.__tmFetchCalls.length;
+              if (cur === last && cur > 0) return;
+              last = cur;
+              await new Promise((r) => setTimeout(r, 200));
+            }
+          };
+          try {
+            // ① 全账号轮转:当前 glm:default + 非当前 volcengine:default 双双刷新
+            const glmBefore = fetchedAt("glm:default");
+            const volcBefore = fetchedAt("volcengine:default");
+            window.__tmHarness.tickBall();
+            await waitFor(() => fetchedAt("glm:default") !== glmBefore, 4000);
+            checks.push(["当前账号已刷新", fetchedAt("glm:default") !== glmBefore]);
+            await waitFor(() => fetchedAt("volcengine:default") !== volcBefore, 4000);
+            checks.push(["非当前账号已刷新(轮转)", fetchedAt("volcengine:default") !== volcBefore]);
+            // ② 单周期基线(轮转后应为 8 = GLM 系 3 账号×2 + 火山 1 + OpenCode 1;
+            //    修复前仅当前账号 = 2 → 本断言红)
+            const c0 = window.__tmFetchCalls.length;
+            window.__tmHarness.tickBall();
+            await settleCycle();
+            const base = window.__tmFetchCalls.length - c0;
+            checks.push(["单周期覆盖全账号(基线>2)", base > 2]);
+            // ③ 重入守卫:两次同步 tick,第二轮必须被跳过(增量 = 基线,不翻倍)
+            const c1 = window.__tmFetchCalls.length;
+            window.__tmHarness.tickBall();
+            window.__tmHarness.tickBall();
+            await settleCycle();
+            const delta = window.__tmFetchCalls.length - c1;
+            checks.push(["重入守卫(双 tick 单周期)", delta === base]);
+          } finally {
+            bridge.net.fetch = prevFetch;
+          }
+          const failed = checks.filter(([, ok]) => !ok);
+          banner.textContent = "轮转自检 " + (failed.length === 0 ? "全部通过" : "失败") + " — " +
+            checks.map(([name, ok]) => name + (ok ? " ✓" : " ✗")).join(" · ");
+          banner.dataset.fail = failed.length > 0 ? "1" : "";
+        } catch (e) {
+          banner.textContent = "轮转自检异常:" + ((e && e.message) || e);
           banner.dataset.fail = "1";
         }
       });
