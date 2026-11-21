@@ -932,6 +932,27 @@ export default function App() {
   const handleSave = useCallback(
     async (draft: Draft) => {
       const now = nowIso();
+      const p = dataPathRef.current;
+      // M2(审查报告 2026-11-21):data-changed 守卫让编辑期间的磁盘外部新增
+      // (如 MCP save_prompt)不进内存 items,直接用内存数组 persist 全量覆写
+      // 会把它们静默抹除(.bak 可人工恢复,但数据丢失)。保存前重读磁盘构建
+      // merge 基线:外部新增天然保留;edit 目标条目以磁盘条目为底、draft 盖上
+      // (保住 copyCount/lastCopiedAt/lastValues/deletedAt 等统计与软删字段);
+      // 目标 id 磁盘不存在(编辑期间被外部删除/异常)→ 以内存条目为底追加。
+      // 读盘失败(JSON 损坏)→ 回退内存 items 全量写:不因合并逻辑把用户挡在
+      // 保存之外(现状语义)。已知残留:重读→写盘间存在毫秒级窗口,并发 MCP
+      // 写仍可丢 —— 闭合需 Rust 锁内读改写命令,已留档不做。
+      let base = items;
+      if (p) {
+        try {
+          const raw = await readDataFile(p);
+          if (raw !== null) {
+            base = coerceItems(JSON.parse(raw));
+          }
+        } catch {
+          /* 磁盘损坏/读失败:回退内存 items 全量写,维持现状语义 */
+        }
+      }
       if (mode.kind === "new") {
         const item: PromptItem = {
           id: newId(),
@@ -939,16 +960,24 @@ export default function App() {
           updatedAt: now,
           ...draft,
         };
-        await persist([item, ...items]);
+        await persist([item, ...base]);
         setSelectedId(item.id);
         setMode({ kind: "view" });
         showToast(t("toast.saved"));
         // 任意新建成功即视为已完成引导,避免删光后反复出现
         markOnboarded();
       } else if (mode.kind === "edit") {
-        const next = items.map((it) =>
-          it.id === mode.id ? { ...it, ...draft, updatedAt: now } : it,
-        );
+        const memTarget = items.find((it) => it.id === mode.id);
+        const next = base.some((it) => it.id === mode.id)
+          ? base.map((it) =>
+              it.id === mode.id ? { ...it, ...draft, updatedAt: now } : it,
+            )
+          : [
+              ...base,
+              memTarget
+                ? { ...memTarget, ...draft, updatedAt: now }
+                : { id: mode.id, createdAt: now, updatedAt: now, ...draft },
+            ];
         await persist(next);
         setMode({ kind: "view" });
         showToast(t("toast.saved"));
