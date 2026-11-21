@@ -109,6 +109,19 @@ const initial: DataFile = emptyMode ? { version: 1, prompts: [] } : seed;
 
 let current = JSON.stringify(initial, null, 2);
 
+if (typeof window !== "undefined") {
+  /** M2 编辑保存合并夹具(审查报告 M2):__pvMockSetData 直接替换内存「磁盘」,
+   *  __pvMockGetData 读回 —— 与 __tmHarnessKv/__pvDrop 同族的夹具钩子,仅预览,
+   *  不参与构建。实机等价性:编辑态收到 data-changed 时守卫跳过刷新(App.tsx),
+   *  内存 items 不含外部新增;预览无 Rust 事件系统(listen 全部失败被 catch),
+   *  「只改 mock current、前端无通知」与实机编辑态的内存状态精确一致。 */
+  (window as unknown as { __pvMockSetData: (json: string) => void }).__pvMockSetData =
+    (json: string) => {
+      current = json;
+    };
+  (window as unknown as { __pvMockGetData: () => string }).__pvMockGetData = () => current;
+}
+
 export async function invoke(cmd: string, args?: Record<string, unknown>) {
   switch (cmd) {
     case "get_data_path":
