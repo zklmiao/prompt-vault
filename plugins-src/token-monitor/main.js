@@ -486,7 +486,11 @@
       pollLabel: '自动轮询(球窗常驻刷新)',
       pollInterval: '间隔(秒,≥120)',
       credFail: '凭据操作失败:',
-      errPrefix: '取数失败:'
+      errPrefix: '取数失败:',
+      lastRefresh: '上次刷新',
+      justNow: '刚刚',
+      minsAgo: '{n} 分钟前',
+      hoursAgo: '{n} 小时前'
     },
     en: {
       panelTitle: 'Usage Monitor',
@@ -529,7 +533,11 @@
       pollLabel: 'Auto poll (ball refresh)',
       pollInterval: 'Interval (sec, ≥120)',
       credFail: 'Credential operation failed: ',
-      errPrefix: 'Fetch failed: '
+      errPrefix: 'Fetch failed: ',
+      lastRefresh: 'Refreshed',
+      justNow: 'just now',
+      minsAgo: '{n} min ago',
+      hoursAgo: '{n} h ago'
     }
   };
 
@@ -563,6 +571,18 @@
     var h = Math.floor(mins / 60);
     var m = mins % 60;
     return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+  }
+
+  /** fetchedAt → 相对时间:<60s「刚刚」/ x 分钟前 / x 小时前(P4 新鲜度展示,
+   *  界面语言相关);非法输入返回 null(调用方回退「—」) */
+  function formatRelativeTime(ts) {
+    if (typeof ts !== 'number' || !isFinite(ts)) return null;
+    var diff = Date.now() - ts;
+    if (diff < 0) diff = 0; // 时钟轻微偏差:按刚刚处理
+    if (diff < 60e3) return tm('justNow');
+    var mins = Math.floor(diff / 60e3);
+    if (mins < 60) return tm('minsAgo').replace('{n}', String(mins));
+    return tm('hoursAgo').replace('{n}', String(Math.floor(mins / 60)));
   }
 
   /** 轮询间隔钳制:≥120s(§5.1 参照社区实践) */
@@ -1407,11 +1427,22 @@
 
   /* ==================== 详情面板(pv.panel.register) ==================== */
 
+  // 面板 cache 重读定时器(模块级单例,P1-a):面板原无任何数据定时器,打开期间
+  // 冻结在打开时刻(球写 cache 无跨窗通知通道);30s 仅 readCache 重读不取数,
+  // 断连自清。render 入口先清旧定时器(StrictMode 双调 render 防双定时器)
+  var panelRefreshTimer = null;
+  var PANEL_REFRESH_MS = 30000;
+
   pv.panel.register({
     id: 'token-monitor',
     title: TM_LANG === 'en' ? 'Usage Monitor' : '用量监控',
     render: function (el) {
       ensureTmStyles();
+      // P1-a:入口先清旧定时器(StrictMode 双调 render 防双定时器)
+      if (panelRefreshTimer !== null) {
+        clearInterval(panelRefreshTimer);
+        panelRefreshTimer = null;
+      }
       el.innerHTML = '';
       var root = tmEl('div', 'pv-tm-panel');
       var colMain = tmEl('div', 'pv-tm-col');
@@ -1832,6 +1863,17 @@
         titlewrap.appendChild(tmEl('div', 'pv-tm-card-title',
           (meta ? meta.label : account.provider) + ' · ' + account.label));
         titlewrap.appendChild(tmEl('div', 'pv-tm-card-sub', meta ? meta.endpoint : ''));
+        // P4 新鲜度展示:cache.fetchedAt 相对时间(同步可信度的可见锚点 ——
+        // P1-a 面板重读后用户可分辨卡片数值是刚刚同步还是久前旧值);
+        // 无 cache / 无 fetchedAt 显示「—」;样式复用 card-sub(muted 小字)
+        var freshText = '—';
+        var fetchedAt = data && typeof data.fetchedAt === 'number' ? data.fetchedAt : null;
+        if (fetchedAt !== null) {
+          var rel = formatRelativeTime(fetchedAt);
+          if (rel !== null) freshText = rel;
+        }
+        titlewrap.appendChild(tmEl('div', 'pv-tm-card-sub',
+          tm('lastRefresh') + ' ' + freshText));
         head.appendChild(titlewrap);
         // 告警胶囊:纯 UI 派生(开关开 && 无取数错误 && 5h% ≥ 阈值),不发通知
         var fivePct = data && data.fiveHour ? data.fiveHour.percent : null;
@@ -1905,5 +1947,16 @@
       }
 
       rerender();
+
+      // P1-a:面板挂载期间 30s 重读 cache(仅 readCache,不发起取数 —— cache 是球
+      // 在写的,面板轮询重读即「准同步」);el 断连即 clearInterval 自清
+      panelRefreshTimer = window.setInterval(function () {
+        if (el.isConnected) {
+          renderPanelCards();
+        } else {
+          clearInterval(panelRefreshTimer);
+          panelRefreshTimer = null;
+        }
+      }, PANEL_REFRESH_MS);
     }
   });
