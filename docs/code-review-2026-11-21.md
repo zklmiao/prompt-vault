@@ -83,6 +83,8 @@
 
 ## 🟠 M2 · 编辑态保存会抹掉外部新增(MCP save_prompt 数据丢失)
 
+> **状态:已修复(333599d,修复卡 M)**——handleSave 保存前重读磁盘按 id 合并(new 分支外部新增天然保留;edit 分支 draft 盖在磁盘条目上保住统计/软删字段;读盘失败回退内存全量写)。已知残留:重读→写盘毫秒级窗口(需 Rust 锁内读改写命令,留档)。
+
 **位置**:`src/App.tsx:475-478`(data-changed 守卫)+ `:932-958`(handleSave persist)。
 
 **链条**:data-changed 守卫在编辑态跳过刷新(`modeRef.current.kind !== "view"` return)
@@ -123,6 +125,7 @@ state 缺失 → **基于过期数据发真实通知**(当前实际用量可能�
   落盘 config.json 无临时文件+替换;崩溃窗口内截断 → data_path/hotkeys 丢失回默认
   (数据文件本体无恙但**链接丢失**,需重走首启动选择)。修复:复用 write_atomic
   (并加 .bak)。同族:set_hotkeys 失败回滚逻辑依赖 write_config 成功,链路一致性随之改善。
+  **状态:已修复(89f9f06,修复卡 M)**——write_config_to 注入形 + write_atomic;.bak 断言测试转绿。
 - **L2 · MCP save_prompt 无字段上限**(mcp/data.rs:149):title/body/tags 无长度约束,
   异常 MCP 客户端可写超大连条目(数据文件膨胀)。建议 title≤200、body≤100KB、
   tags≤32 项×32 字符,超限以 isError 结果回包。
@@ -139,6 +142,8 @@ state 缺失 → **基于过期数据发真实通知**(当前实际用量可能�
 - **L7 · `DEFAULT_DATA_PATH` 为开发机绝对路径**(lib.rs:31,`E:\Agent\Proj\…`):
   首启动对话框对其它用户建议无效路径(目录创建静默失败)。发布视角的可移植性债务;
   建议 `%USERPROFILE%\Documents\prompt-vault\prompts.json`(设计上有意,需共识后改)。
+  **状态:已修复(e070dab,修复卡 M)**——常量已删除,first_run_default_under 三级回退
+  (document_dir 优先,含 OneDrive 重定向);dev 冒烟确认对话框建议路径 = Documents 推导。
 - **L8(信息)· 彩蛋摘要可被低熵密语爆破**:EGG_DIGEST 公开于仓库,密语若为常见
   短语可被字典攻击恢复。私人彩蛋威胁模型下可接受;密语保持高熵即可。
 - **L9(信息)· 球窗全局 mousemove 常驻**(main.js:950):setupBall 在 window 上挂
@@ -276,7 +281,8 @@ M3(maybeNotify 无 resetAt 过期检查——本轮:1165-1172 再证)——**已
 T1(重开不写回 window:visible → 重启球永不自启)——**已修复(1317525)**;
 T2(error 态可开兜底尺寸窗口)——**已修复(1317525)**;
 T3(切换账号与 tick 竞速短暂串显,记录不修)、
-L1-L9 与已知接受项不变。
+L1(config 原子写)**已修复(89f9f06,修复卡 M)**、L7(路径可移植)**已修复(e070dab,修复卡 M)**、
+L2/L3/L4/L5/L6/L8/L9 与已知接受项不变。
 
 ## 本轮验证方式说明(诚实边界)
 
