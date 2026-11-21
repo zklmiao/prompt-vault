@@ -19,6 +19,7 @@ import {
 import {
   fetchSource,
   installPlugin,
+  kvSet,
   pluginCloseWindow,
   pluginInstalledManifest,
   pluginOpenWindow,
@@ -361,9 +362,16 @@ export default function PluginHub({
   const openPluginWindow = useCallback(
     (id: string) => {
       const size = getWindowSetup(id)?.size;
-      pluginOpenWindow(id, size).catch((e) =>
-        showToast(t("ph.toastOpenWindowFailed", { msg: String(e) }), "err"),
-      );
+      pluginOpenWindow(id, size)
+        .then(() =>
+          // T1(审查报告 2026-11-21):重开成功后写回 window:visible=true ——
+          // 否则「隐藏过 → 主窗重开」的窗口下次启动仍按 visible=false 不自启,
+          // 陷入每次重启手动开。写失败静默(下次重开重试,非关键数据)
+          kvSet(id, "window:visible", true).catch(() => {}),
+        )
+        .catch((e) =>
+          showToast(t("ph.toastOpenWindowFailed", { msg: String(e) }), "err"),
+        );
     },
     [showToast, t],
   );
@@ -511,7 +519,11 @@ export default function PluginHub({
                 {isWindow && entry.enabled ? (
                   <button
                     className="icon-btn"
-                    title={t("ph.openWindow")}
+                    // T2(审查报告 2026-11-21):注入失败(error 非 null)时
+                    // registry 无 windowSetup,size=undefined 会兜底开一个错误态
+                    // 窗口 —— 直接禁用,提示「插件加载异常」
+                    title={entry.error != null ? t("ph.openWindowError") : t("ph.openWindow")}
+                    disabled={entry.error != null}
                     onClick={() => openPluginWindow(id)}
                   >
                     <IconPopout size={16} />
