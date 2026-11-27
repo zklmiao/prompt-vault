@@ -13,7 +13,7 @@ No account, no cloud, no telemetry. Your prompts stay in a plain JSON file.</sub
 
 <img src="docs/screenshots/detail-dark.png" width="86%" alt="Prompt Vault 主界面" />
 
-<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.3--alpha-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white"></a> <a href="https://react.dev"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black"></a> <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white"></a> <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a> <img alt="Platform" src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4?logo=windows&logoColor=white"> <img alt="GLM 5.3" src="https://img.shields.io/badge/GLM-5.3-3B6CF6"> <img alt="GLM 5.3 Flash" src="https://img.shields.io/badge/GLM-5.3--Flash-7A5CF0"> <img alt="DeepSeek 4.1 Flash" src="https://img.shields.io/badge/DeepSeek-4.1--Flash-4D6BFE"> <img alt="Version" src="https://img.shields.io/badge/Version-0.1.9.3-5865F2"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"></a> <img alt="Local First" src="https://img.shields.io/badge/Data-100%25%20Local-success">
 
 </div>
 
@@ -102,21 +102,21 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 ### 方式一：下载即用（推荐）
 
-**尝鲜版 `v0.1.9.3-alpha` 直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3-alpha/PromptVault-0.1.9.3-alpha-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3-alpha/PromptVault-0.1.9.3-alpha-portable.exe)
+**稳定版 `v0.1.9.3` 直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3/PromptVault-0.1.9.3-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3/PromptVault-0.1.9.3-portable.exe)
 
-到 [**Releases**](../../releases) 下载稳定版（预发布版本在 Pre-release 区域）：
+到 [**Releases**](../../releases) 下载最新版（历史预发布版本在 Pre-release 区域）：
 
-> **推荐体验 `v0.1.9.3-alpha`**：新增界面常驻快捷键提示（侧栏底部）与快速拾取 `Ctrl+N` 唤出主窗口新建。发布前已通过程序化测试（TypeScript 类型检查零错误、Rust 测试 7/7 通过、构建与冒烟启动）；欢迎试用并反馈问题。
+> **`v0.1.9.3` 正式版**：`0.1.9` 系列三轮预发布（快速拾取 2.0 双栏预览与模糊搜索、命令面板与快捷键速查表、首次启动引导、键盘导航闭环、常驻快捷键提示、快速拾取 `Ctrl+N` 唤出主窗口新建）全部转正，并合入三项安全审计修复（`config.json` 原子写、首启动建议路径按用户环境可移植推导、编辑保存前重读磁盘合并——外部新增不再被静默抹除）。发布前已通过程序化测试（TypeScript 类型检查零错误、Rust 测试全量通过、构建与冒烟启动）；欢迎试用并反馈问题。
 
 | 文件 | 说明 |
 |---|---|
-| `PromptVault-0.1.9.3-alpha-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
-| `PromptVault-0.1.9.3-alpha-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
+| `PromptVault-0.1.9.3-setup.exe` | NSIS 安装包，装进系统，开始菜单可启动 |
+| `PromptVault-0.1.9.3-portable.exe` | 单文件绿色版，放到哪都能双击运行 |
 
-> 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议工程内 `data/` 目录），之后路径与窗口位置都会记住。
+> 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议在「文档」目录下的 `prompt-vault` 文件夹，按你的用户环境自动推导），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
 
-> 当前源码版本为 **0.1.9.3-alpha**（清单内为合法 semver `0.1.9-alpha.3`），为预发布（pre-release）；稳定版仍为 `v0.1.0`。
+> 当前源码版本为 **0.1.9**（显示版本 `v0.1.9.3`），为当前稳定版；预发布系列（`v0.1.9-alpha` → `v0.1.9.3-alpha`）存档在 Pre-release 区域。
 
 ### 方式二：从源码构建
 
@@ -275,8 +275,9 @@ npx vite --config preview/vite.preview.config.ts
 - [x] 命令面板（`Ctrl+K`）与快捷键速查表（`?`）
 - [x] 首次启动引导 / 详情级联淡入 / 中文输入法组字保护
 - [ ] 占位符实时预览、搜索命中片段、右键菜单、标签配色（详见 [docs/backlog.md](docs/backlog.md)）
-- [x] 发布 v0.1.9 系列预发布（v0.1.9-alpha → v0.1.9.2-alpha，附回归测试报告；正式 Release 待定）
+- [x] 发布 v0.1.9 系列预发布（v0.1.9-alpha → v0.1.9.3-alpha，附回归测试报告）
 - [x] 界面常驻快捷键提示 / 快速拾取 `Ctrl+N` 唤出主窗口新建（v0.1.9.3-alpha）
+- [x] 发布 v0.1.9.3 正式版（0.1.9 系列转正 + 审计修复 L1/L7/M2 回归）
 - [ ] 数据量过千后评估 SQLite + FTS5
 
 ---
