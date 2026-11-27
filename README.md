@@ -106,7 +106,7 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 **尝鲜版 `v0.2.0-alpha`（插件系统预览版）直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.2.0-alpha/PromptVault-0.2.0-alpha-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.2.0-alpha/PromptVault-0.2.0-alpha-portable.exe)
 
-> **尝鲜 `v0.2.0-alpha`**：插件系统首个预览版——仓库源 + 市场安装（GitHub / Gitee / GitLab / 自建 Gitea，sha256 校验、zip-slip 与解压限额防护、权限逐条确认）、Token 用量悬浮圆球（GLM / 火山方舟 / OpenCode，同供应商多账号多 Key 轮换，国内/国际端点）、界面中英文切换（i18n 语言包）、MCP Server（`--mcp` 供 AI 客户端检索收藏）。预发布版本，界面与插件 API 仍可能变动；求稳请用上方 `v0.1.9.3` 正式版。
+> **尝鲜 `v0.2.0-alpha`**：插件系统首个预览版——仓库源 + 市场安装（GitHub / Gitee / GitLab / 自建 Gitea，sha256 校验、zip-slip 与解压限额防护、权限逐条确认）、Token 用量悬浮圆球（GLM / 火山方舟 / OpenCode，同供应商多账号多 Key 轮换，国内/国际端点，桌面常驻 5h 环形进度）、**用量告警**（每账号可设阈值，默认 80%：5 小时窗口用量触顶即系统通知，同窗口不重发不轰炸）、界面中英文切换（i18n 语言包）、MCP Server（`--mcp` 供 AI 客户端检索收藏）。预发布版本，界面与插件 API 仍可能变动；求稳请用上方 `v0.1.9.3` 正式版。
 
 到 [**Releases**](../../releases) 下载最新版（历史预发布版本在 Pre-release 区域）：
 
