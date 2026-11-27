@@ -104,6 +104,10 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 
 **稳定版 `v0.1.9.3` 直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3/PromptVault-0.1.9.3-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.1.9.3/PromptVault-0.1.9.3-portable.exe)
 
+**尝鲜版 `v0.2.0-alpha`（插件系统预览版）直达下载**：[安装包](https://github.com/zklmiao/prompt-vault/releases/download/v0.2.0-alpha/PromptVault-0.2.0-alpha-setup.exe) · [绿色便携版](https://github.com/zklmiao/prompt-vault/releases/download/v0.2.0-alpha/PromptVault-0.2.0-alpha-portable.exe)
+
+> **尝鲜 `v0.2.0-alpha`**：插件系统首个预览版——仓库源 + 市场安装（GitHub / Gitee / GitLab / 自建 Gitea，sha256 校验、zip-slip 与解压限额防护、权限逐条确认）、Token 用量悬浮圆球（GLM / 火山方舟 / OpenCode，同供应商多账号多 Key 轮换，国内/国际端点）、界面中英文切换（i18n 语言包）、MCP Server（`--mcp` 供 AI 客户端检索收藏）。预发布版本，界面与插件 API 仍可能变动；求稳请用上方 `v0.1.9.3` 正式版。
+
 到 [**Releases**](../../releases) 下载最新版（历史预发布版本在 Pre-release 区域）：
 
 > **`v0.1.9.3` 正式版**：`0.1.9` 系列三轮预发布（快速拾取 2.0 双栏预览与模糊搜索、命令面板与快捷键速查表、首次启动引导、键盘导航闭环、常驻快捷键提示、快速拾取 `Ctrl+N` 唤出主窗口新建）全部转正，并合入三项安全审计修复（`config.json` 原子写、首启动建议路径按用户环境可移植推导、编辑保存前重读磁盘合并——外部新增不再被静默抹除）。发布前已通过程序化测试（TypeScript 类型检查零错误、Rust 测试全量通过、构建与冒烟启动）；欢迎试用并反馈问题。
@@ -116,7 +120,7 @@ Prompt Vault 把它们收进一个**托盘常驻、随叫随到**的桌面工具
 > 首次启动会让你选择一个 `prompts.json` 的保存位置（默认建议在「文档」目录下的 `prompt-vault` 文件夹，按你的用户环境自动推导），之后路径与窗口位置都会记住。
 > 想备份？复制那个 JSON 文件即可；换机器？导出再导入。
 
-> 当前源码版本为 **0.1.9**（显示版本 `v0.1.9.3`），为当前稳定版；预发布系列（`v0.1.9-alpha` → `v0.1.9.3-alpha`）存档在 Pre-release 区域。
+> 当前源码版本为 **0.1.9**（显示版本 `v0.1.9.3`），为当前稳定版；预发布系列（`v0.1.9-alpha` → `v0.1.9.3-alpha`）与插件系统预览版 `v0.2.0-alpha` 存档在 Pre-release 区域。
 
 ### 方式二：从源码构建
 
