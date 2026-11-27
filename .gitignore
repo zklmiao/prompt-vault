@@ -34,3 +34,14 @@ test-files/
 
 # 预览截图(本地调试产物,不提交)
 preview/shot*.png
+
+# tsc 增量构建产物
+*.tsbuildinfo
+
+# 工具产物(不提交)
+.mimosa/
+.zcode/
+docs/audits/
+
+# 插件源码目录(main 上未跟踪;feat/plugin-system 分支已跟踪)
+plugin-source/
